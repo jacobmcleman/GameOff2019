@@ -1,15 +1,19 @@
 extern crate quicksilver;
 
 use quicksilver::{
-    Result,
-    geom::{Circle, Line, Rectangle, Transform, Triangle, Vector},
-    graphics::{Background::Col, Color},
+    Future, Result,
+    combinators::result,
+    geom::{Circle, Rectangle, Shape, Vector},
+    graphics::{Background::Col, Background::Img, Color, Font, FontStyle},
     input::{Key},
-    lifecycle::{Settings, State, Window, run}
+    lifecycle::{Asset, Settings, State, Window, run},
 };
 
 struct DrawObjects {
-    player: GameObject
+    player: GameObject,
+    show_framerate: bool,
+    fps_font: Font,
+    fps_font_style: FontStyle
 }
 
 enum SpriteShape {
@@ -36,13 +40,33 @@ impl GameObject {
 
 impl State for DrawObjects {
     fn new() -> Result<DrawObjects> {
+        let fps_font: Font = match Font::load("SourceCodePro.ttf").wait() {
+            Ok(f) => f,
+            Err(e) => {
+                println!("Failed to load SourceCodePro.ttf! : {:?}", e);
+                return Err(e);
+            }
+        };
+        let fps_font_style: FontStyle = FontStyle::new(24.0, Color::YELLOW);
+
         let player = GameObject { position: Vector::new(100, 100), rotation: 0.0, scale: Vector::new(100, 100), shape: SpriteShape::Circle, color: Color::BLUE};
-        Ok(DrawObjects {player} )
+        Ok(DrawObjects {player, show_framerate: false, fps_font, fps_font_style} )
     }
 
     fn draw(&mut self, window: &mut Window) -> Result<()> {
-        window.clear(Color::WHITE)?;
+        window.clear(Color::BLACK)?;
         self.player.draw(window);
+
+        if self.show_framerate {
+            // Show 2 decimal places after the .
+            let fps_string = format!("FPS: {:.*}", 2, window.current_fps());
+            let mut fps_text = Asset::new(result(self.fps_font.render(&fps_string, &self.fps_font_style)));
+            fps_text.execute(|image| {
+                window.draw(&image.area().with_center((650, 50)), Img(&image));
+                Ok(())
+            })?;
+        }
+
         Ok(())
     }
 
@@ -58,6 +82,10 @@ impl State for DrawObjects {
         }
         if window.keyboard()[Key::W].is_down() {
             self.player.position.y -= 1.0;
+        }
+
+        if window.keyboard()[Key::Q].is_down() {
+            self.show_framerate = !self.show_framerate;
         }
 
         Ok(())
