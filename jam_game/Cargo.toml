@@ -8,3 +8,4 @@ edition = "2018"
 
 [dependencies]
 quicksilver = "0.3.20"
+recs = "2.0.1"

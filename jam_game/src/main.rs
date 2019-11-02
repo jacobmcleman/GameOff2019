@@ -1,4 +1,7 @@
 extern crate quicksilver;
+#[macro_use]
+extern crate recs;
+use recs::{Ecs, EntityId};
 
 use quicksilver::{
     Future, Result,
@@ -9,37 +12,46 @@ use quicksilver::{
     lifecycle::{Asset, Settings, State, Window, run},
 };
 
-struct DrawObjects {
-    player: GameObject,
-    show_framerate: bool,
-    fps_font: Font,
-    fps_font_style: FontStyle
-}
-
+#[derive(Copy, Clone, Debug, PartialEq)]
 enum SpriteShape {
     Circle,
     Rectangle
 }
 
-struct GameObject {
-    position: Vector,
-    rotation: f32,
-    scale: Vector,
+#[derive(Clone, Debug, PartialEq)]
+struct Sprite {
     shape: SpriteShape,
     color: Color
 }
 
-impl GameObject {
-    fn draw(&mut self, window: &mut Window) {
-        match self.shape {
-            SpriteShape::Circle => window.draw(&Circle::new(self.position, self.scale.x), Col(self.color)),
-            SpriteShape::Rectangle => window.draw(&Rectangle::new(self.position, self.scale), Col(self.color))
-        }
+#[derive(Clone, Debug, PartialEq)]
+struct Transform {
+    position: Vector,
+    rotation: f32,
+    scale: Vector
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct KeyboardMove {
+    entity: EntityId 
+}
+
+struct GameplayState {
+    system: Ecs,
+    show_framerate: bool,
+    fps_font: Font,
+    fps_font_style: FontStyle
+}
+
+fn Draw(window: &mut Window, sprite: &Sprite, transform: &Transform) {
+    match sprite.shape {
+        SpriteShape::Circle => window.draw(&Circle::new(transform.position, transform.scale.x), Col(sprite.color)),
+        SpriteShape::Rectangle => window.draw(&Rectangle::new(transform.position, transform.scale), Col(sprite.color))
     }
 }
 
-impl State for DrawObjects {
-    fn new() -> Result<DrawObjects> {
+impl State for GameplayState {
+    fn new() -> Result<GameplayState> {
         let fps_font: Font = match Font::load("SourceCodePro.ttf").wait() {
             Ok(f) => f,
             Err(e) => {
@@ -47,15 +59,43 @@ impl State for DrawObjects {
                 return Err(e);
             }
         };
-        let fps_font_style: FontStyle = FontStyle::new(24.0, Color::YELLOW);
+        let mut system = Ecs::new();
+        let playerEnt: EntityId = system.create_entity();
 
-        let player = GameObject { position: Vector::new(100, 100), rotation: 0.0, scale: Vector::new(100, 100), shape: SpriteShape::Circle, color: Color::BLUE};
-        Ok(DrawObjects {player, show_framerate: false, fps_font, fps_font_style} )
+        // Ignore result since this ID should be valid, we literally just made it
+        let _ = system.set(playerEnt, Transform { position: Vector::new(100, 100), rotation: 0.0, scale: Vector::new(100, 100) });
+        let _ = system.set(playerEnt, Sprite { shape: SpriteShape::Circle, color: Color::BLUE });
+
+        let fps_font_style: FontStyle = FontStyle::new(24.0, Color::YELLOW);
+        Ok(GameplayState {system, show_framerate: false, fps_font, fps_font_style} )
     }
 
     fn draw(&mut self, window: &mut Window) -> Result<()> {
         window.clear(Color::BLACK)?;
-        self.player.draw(window);
+
+        // Get the ids of components that have both a transform and a sprite (everything needed to draw)
+        let mut drawable_ids: Vec<EntityId> = Vec::new();
+        let filter = component_filter!(Sprite, Transform);
+        self.system.collect_with(&filter, &mut drawable_ids);
+        // Draw everything that we can draw
+        for drawable in drawable_ids {
+            let sprite = match self.system.borrow::<Sprite>(drawable) {
+                Ok(s) => s,
+                _ => {
+                    println!("Failed to find sprite component!");
+                    return Ok(())
+                }
+            };
+
+            let transform = match self.system.borrow::<Transform>(drawable) {
+                Ok(s) => s,
+                _ => {
+                    println!("Failed to find transform component!");
+                    return Ok(())
+                }
+            };
+            Draw(window, sprite, transform);
+        }
 
         if self.show_framerate {
             // Show 2 decimal places after the .
@@ -71,18 +111,7 @@ impl State for DrawObjects {
     }
 
     fn update(&mut self, window: &mut Window) -> Result<()> {
-        if window.keyboard()[Key::A].is_down() {
-            self.player.position.x -= 1.0;
-        }
-        if window.keyboard()[Key::D].is_down() {
-            self.player.position.x += 1.0;
-        }
-        if window.keyboard()[Key::S].is_down() {
-            self.player.position.y += 1.0;
-        }
-        if window.keyboard()[Key::W].is_down() {
-            self.player.position.y -= 1.0;
-        }
+        
 
         if window.keyboard()[Key::Q].is_down() {
             self.show_framerate = !self.show_framerate;
@@ -93,5 +122,9 @@ impl State for DrawObjects {
 }
 
 fn main() {
-    run::<DrawObjects>("Game Test", Vector::new(800, 600), Settings::default());
+    
+
+
+
+    run::<GameplayState>("Game Test", Vector::new(800, 600), Settings::default());
 }
