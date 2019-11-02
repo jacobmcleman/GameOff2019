@@ -4,18 +4,17 @@ extern crate recs;
 use recs::{Ecs, EntityId};
 
 use quicksilver::{
-    Future, Result,
-    combinators::result,
-    geom::{Circle, Rectangle, Shape, Vector},
-    graphics::{Background::Col, Background::Img, Color, Font, FontStyle},
+    Result,
+    geom::{Circle, Rectangle, Vector},
+    graphics::{Background::Col, Color},
     input::{Key},
-    lifecycle::{Asset, Settings, State, Window, run},
+    lifecycle::{Settings, State, Window, run},
 };
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 enum SpriteShape {
-    Circle,
-    Rectangle
+    _Circle,
+    _Rectangle
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -33,41 +32,31 @@ struct Transform {
 
 #[derive(Clone, Debug, PartialEq)]
 struct KeyboardMove {
-    entity: EntityId 
+    speed: f32
 }
 
 struct GameplayState {
-    system: Ecs,
-    show_framerate: bool,
-    fps_font: Font,
-    fps_font_style: FontStyle
+    system: Ecs
 }
 
 fn draw(window: &mut Window, sprite: &Sprite, transform: &Transform) {
     match sprite.shape {
-        SpriteShape::Circle => window.draw(&Circle::new(transform.position, transform.scale.x), Col(sprite.color)),
-        SpriteShape::Rectangle => window.draw(&Rectangle::new(transform.position, transform.scale), Col(sprite.color))
+        SpriteShape::_Circle => window.draw(&Circle::new(transform.position, transform.scale.x), Col(sprite.color)),
+        SpriteShape::_Rectangle => window.draw(&Rectangle::new(transform.position, transform.scale), Col(sprite.color))
     }
 }
 
 impl State for GameplayState {
     fn new() -> Result<GameplayState> {
-        let fps_font: Font = match Font::load("SourceCodePro.ttf").wait() {
-            Ok(f) => f,
-            Err(e) => {
-                println!("Failed to load SourceCodePro.ttf! : {:?}", e);
-                return Err(e);
-            }
-        };
         let mut system = Ecs::new();
         let player_ent: EntityId = system.create_entity();
 
         // Ignore result since this ID should be valid, we literally just made it
         let _ = system.set(player_ent, Transform { position: Vector::new(100, 100), rotation: 0.0, scale: Vector::new(100, 100) });
-        let _ = system.set(player_ent, Sprite { shape: SpriteShape::Circle, color: Color::BLUE });
+        let _ = system.set(player_ent, Sprite { shape: SpriteShape::_Circle, color: Color::BLUE });
+        let _ = system.set(player_ent, KeyboardMove { speed: 2.5 });
 
-        let fps_font_style: FontStyle = FontStyle::new(24.0, Color::YELLOW);
-        Ok(GameplayState {system, show_framerate: false, fps_font, fps_font_style} )
+        Ok(GameplayState {system } )
     }
 
     fn draw(&mut self, window: &mut Window) -> Result<()> {
@@ -79,30 +68,37 @@ impl State for GameplayState {
         self.system.collect_with(&drawable_filter, &mut drawable_ids);
         // Draw everything that we can draw
         for drawable in drawable_ids {
-            let sprite = self.system.borrow::<Sprite>(drawable).unwrap();
-            let transform = self.system.borrow::<Transform>(drawable).unwrap();
+            let sprite: &Sprite = self.system.borrow(drawable).unwrap();
+            let transform: &Transform = self.system.borrow(drawable).unwrap();
             draw(window, sprite, transform);
-        }
-
-        if self.show_framerate {
-            // Show 2 decimal places after the .
-            let fps_string = format!("FPS: {:.*}", 2, window.current_fps());
-            let mut fps_text = Asset::new(result(self.fps_font.render(&fps_string, &self.fps_font_style)));
-            fps_text.execute(|image| {
-                window.draw(&image.area().with_center((650, 50)), Img(&image));
-                Ok(())
-            })?;
         }
 
         Ok(())
     }
 
     fn update(&mut self, window: &mut Window) -> Result<()> {
-        
+         // Get the ids of components that have both a transform and a sprite (everything needed to draw)
+         let mut updatable_ids: Vec<EntityId> = Vec::new();
+         let updatable_filter = component_filter!(KeyboardMove, Transform);
+         self.system.collect_with(&updatable_filter, &mut updatable_ids);
+         // Draw everything that we can draw
+         for updateable in updatable_ids {
+            let mover: &KeyboardMove = self.system.borrow(updateable).unwrap();
+            let mut x_move = 0.0;
+            let mut y_move = 0.0;
 
-        if window.keyboard()[Key::Q].is_down() {
-            self.show_framerate = !self.show_framerate;
-        }
+            if window.keyboard()[Key::W].is_down() { y_move -= mover.speed; }
+            if window.keyboard()[Key::S].is_down() { y_move += mover.speed; }
+            if window.keyboard()[Key::A].is_down() { x_move -= mover.speed; }
+            if window.keyboard()[Key::D].is_down() { x_move += mover.speed; }
+            
+            if x_move != 0.0 {
+                self.system.borrow_mut::<Transform>(updateable).map(|transform| transform.position.x += x_move).unwrap();
+            }
+            if y_move != 0.0 {
+                self.system.borrow_mut::<Transform>(updateable).map(|transform| transform.position.y += y_move).unwrap();
+            }
+         }
 
         Ok(())
     }
