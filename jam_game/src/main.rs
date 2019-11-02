@@ -47,16 +47,16 @@ impl State for DrawObjects {
     }
 
     fn update(&mut self, window: &mut Window) -> Result<()> {
-        if window.keyboard()[Key::Left].is_down() {
+        if window.keyboard()[Key::A].is_down() {
             self.player.position.x -= 1.0;
         }
-        if window.keyboard()[Key::Right].is_down() {
+        if window.keyboard()[Key::D].is_down() {
             self.player.position.x += 1.0;
         }
-        if window.keyboard()[Key::Down].is_down() {
+        if window.keyboard()[Key::S].is_down() {
             self.player.position.y += 1.0;
         }
-        if window.keyboard()[Key::Up].is_down() {
+        if window.keyboard()[Key::W].is_down() {
             self.player.position.y -= 1.0;
         }
 
