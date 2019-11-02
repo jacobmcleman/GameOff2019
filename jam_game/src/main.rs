@@ -43,7 +43,7 @@ struct GameplayState {
     fps_font_style: FontStyle
 }
 
-fn Draw(window: &mut Window, sprite: &Sprite, transform: &Transform) {
+fn draw(window: &mut Window, sprite: &Sprite, transform: &Transform) {
     match sprite.shape {
         SpriteShape::Circle => window.draw(&Circle::new(transform.position, transform.scale.x), Col(sprite.color)),
         SpriteShape::Rectangle => window.draw(&Rectangle::new(transform.position, transform.scale), Col(sprite.color))
@@ -60,11 +60,11 @@ impl State for GameplayState {
             }
         };
         let mut system = Ecs::new();
-        let playerEnt: EntityId = system.create_entity();
+        let player_ent: EntityId = system.create_entity();
 
         // Ignore result since this ID should be valid, we literally just made it
-        let _ = system.set(playerEnt, Transform { position: Vector::new(100, 100), rotation: 0.0, scale: Vector::new(100, 100) });
-        let _ = system.set(playerEnt, Sprite { shape: SpriteShape::Circle, color: Color::BLUE });
+        let _ = system.set(player_ent, Transform { position: Vector::new(100, 100), rotation: 0.0, scale: Vector::new(100, 100) });
+        let _ = system.set(player_ent, Sprite { shape: SpriteShape::Circle, color: Color::BLUE });
 
         let fps_font_style: FontStyle = FontStyle::new(24.0, Color::YELLOW);
         Ok(GameplayState {system, show_framerate: false, fps_font, fps_font_style} )
@@ -75,26 +75,13 @@ impl State for GameplayState {
 
         // Get the ids of components that have both a transform and a sprite (everything needed to draw)
         let mut drawable_ids: Vec<EntityId> = Vec::new();
-        let filter = component_filter!(Sprite, Transform);
-        self.system.collect_with(&filter, &mut drawable_ids);
+        let drawable_filter = component_filter!(Sprite, Transform);
+        self.system.collect_with(&drawable_filter, &mut drawable_ids);
         // Draw everything that we can draw
         for drawable in drawable_ids {
-            let sprite = match self.system.borrow::<Sprite>(drawable) {
-                Ok(s) => s,
-                _ => {
-                    println!("Failed to find sprite component!");
-                    return Ok(())
-                }
-            };
-
-            let transform = match self.system.borrow::<Transform>(drawable) {
-                Ok(s) => s,
-                _ => {
-                    println!("Failed to find transform component!");
-                    return Ok(())
-                }
-            };
-            Draw(window, sprite, transform);
+            let sprite = self.system.borrow::<Sprite>(drawable).unwrap();
+            let transform = self.system.borrow::<Transform>(drawable).unwrap();
+            draw(window, sprite, transform);
         }
 
         if self.show_framerate {
