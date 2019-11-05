@@ -2,12 +2,12 @@ extern crate quicksilver;
 #[macro_use]
 extern crate recs;
 use recs::{Ecs, EntityId};
-
 use noise::{NoiseFn, HybridMulti};
+use std::collections::HashMap;
 
 use quicksilver::{
     Result,
-    geom::{Circle, Rectangle, Vector},
+    geom::{Circle, Rectangle, Vector, Transform},
     graphics::{Background::Col, Color, View},
     input::{Key},
     lifecycle::{Settings, State, Window, run},
@@ -19,7 +19,7 @@ enum SpriteShape {
     _Rectangle
 }
 
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 enum TileValue {
     Empty,
     Rock,
@@ -51,7 +51,8 @@ struct Camera {
 
 struct TileMap {
     generator_func: HybridMulti,
-    rock_density: f64
+    rock_density: f64,
+    tile_drawables: HashMap<TileValue, Color>
 }
 
 struct GameplayState {
@@ -63,7 +64,14 @@ struct GameplayState {
 impl TileMap {
     fn new() -> TileMap {
         let generator_func = HybridMulti::new();
-        TileMap { generator_func, rock_density: 0.5 }
+
+        let tile_drawables:  HashMap<TileValue, Color> = [
+            (TileValue::Empty, Color::from_rgba(127, 127, 127, 1.0)),
+            (TileValue::Rock, Color::from_rgba(227, 227, 227, 1.0)),
+            (TileValue::Error, Color::MAGENTA)
+        ].iter().cloned().collect();
+
+        TileMap { generator_func, rock_density: 0.5, tile_drawables }
     }
 
     fn sample(&self, x: i32, y: i32) -> TileValue {
@@ -81,6 +89,12 @@ impl TileMap {
 
     fn draw(&self, window: &mut Window, view_box: &Rectangle) {
         // TODO: Optimize the shit out of this
+        /* Ideas for this: 
+            - Don't need to resample noise very frame since most of the tiles are the same, only need to sample on the edges or when there is a change
+            - Don't need to make a new transform every frame either, same reason
+            - Use faster noise function
+            - Is the color copy slow?
+        */
         // TODO: Consider double size tiles at low zoom for LOD
 
         // Bounds to draw between
@@ -89,14 +103,13 @@ impl TileMap {
         let y_min = view_box.pos.y.floor() as i32;
         let y_max =(view_box.pos.y + view_box.size.y).ceil() as i32;
 
+        let rect = Rectangle::new_sized((1, 1));
+        
         // Draw one sprite rectangle for each tile within the bounds
         for x in x_min..x_max {
             for y in y_min..y_max {
-                match self.sample(x, y) {
-                    TileValue::Empty => window.draw(&Rectangle::new((x, y), (1, 1)), Col(Color::from_rgba(127, 127, 127, 1.0))),
-                    TileValue::Rock => window.draw(&Rectangle::new((x, y), (1, 1)), Col(Color::from_rgba(227, 227, 227, 1.0))),
-                    TileValue::Error => window.draw(&Rectangle::new((x, y), (1, 1)), Col(Color::MAGENTA))
-                }
+                let col: Color = match self.tile_drawables.get(&self.sample(x, y)) { Some(c) => c.clone(), _ => Color::MAGENTA };
+                window.draw_ex(&rect, Col(col), Transform::translate((x, y)), 0);
             }
         }
     }
