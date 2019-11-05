@@ -87,7 +87,9 @@ impl TileMap {
         let x_min = view_box.pos.x.floor() as i32;
         let x_max =(view_box.pos.x + view_box.size.x).ceil() as i32;
         let y_min = view_box.pos.y.floor() as i32;
-        let y_max =(view_box.pos.x + view_box.size.y).ceil() as i32;
+        let y_max =(view_box.pos.y + view_box.size.y).ceil() as i32;
+
+        println!("Drawing from ({}, {}) to({}, {})", x_min, y_min, x_max, y_max);
 
         // Draw one sprite rectangle for each tile within the bounds
         for x in x_min..x_max {
