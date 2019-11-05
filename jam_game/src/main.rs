@@ -3,7 +3,7 @@ extern crate quicksilver;
 extern crate recs;
 use recs::{Ecs, EntityId};
 
-use noise::{NoiseFn, Checkerboard};
+use noise::{NoiseFn, HybridMulti};
 
 use quicksilver::{
     Result,
@@ -49,9 +49,9 @@ struct Camera {
     height: f32
 }
 
-#[derive(Debug)]
 struct TileMap {
-    generator_func: Checkerboard
+    generator_func: HybridMulti,
+    rock_density: f64
 }
 
 struct GameplayState {
@@ -62,8 +62,8 @@ struct GameplayState {
 
 impl TileMap {
     fn new() -> TileMap {
-        let generator_func = Checkerboard::new();
-        TileMap {generator_func}
+        let generator_func = HybridMulti::new();
+        TileMap { generator_func, rock_density: 0.5 }
     }
 
     fn sample(&self, x: i32, y: i32) -> TileValue {
@@ -71,7 +71,7 @@ impl TileMap {
 
         // If no edits have been applied to this tile, sample the noise function to decide what goes here
         // Noise is from -1..1 but I only want 0..1 so shift it first
-        let value = (self.generator_func.get([x as f64, y as f64]) + 1.0) / 2.0;
+        let value = (self.generator_func.get([x as f64, y as f64]) + 1.0) / (2.0 + self.rock_density);
         match value.round() as i32 {
             0 => TileValue::Empty,
             1 => TileValue::Rock,
@@ -88,8 +88,6 @@ impl TileMap {
         let x_max =(view_box.pos.x + view_box.size.x).ceil() as i32;
         let y_min = view_box.pos.y.floor() as i32;
         let y_max =(view_box.pos.y + view_box.size.y).ceil() as i32;
-
-        println!("Drawing from ({}, {}) to({}, {})", x_min, y_min, x_max, y_max);
 
         // Draw one sprite rectangle for each tile within the bounds
         for x in x_min..x_max {
@@ -157,7 +155,7 @@ impl State for GameplayState {
 
     fn update(&mut self, window: &mut Window) -> Result<()> {
         // Get change in time since last frame
-        let framerate = window.current_fps() as f32;
+        let framerate = window.current_fps();
         // First frame has framerate of 0 and that makes for a sad division time so catch that fucker here before it fucks everything up
         let delta_time = if framerate < 1.0 { 0.0 } else { 1.0 / framerate };
 
@@ -175,8 +173,8 @@ impl State for GameplayState {
             if window.keyboard()[Key::A].is_down() { x_move -= mover.speed; }
             if window.keyboard()[Key::D].is_down() { x_move += mover.speed; }
             
-            x_move *= delta_time;
-            y_move *= delta_time;
+            x_move *= delta_time as f32;
+            y_move *= delta_time as f32;
 
             if x_move != 0.0 {
                 self.system.borrow_mut::<TransformComponent>(updateable).map(|transform| transform.position.x += x_move).unwrap();
@@ -185,6 +183,23 @@ impl State for GameplayState {
                 self.system.borrow_mut::<TransformComponent>(updateable).map(|transform| transform.position.y += y_move).unwrap();
             }
          }
+
+        if window.keyboard()[Key::Q].is_down() {
+            self.system.borrow_mut::<Camera>(self.camera_id).map(|cam| cam.height += delta_time as f32).unwrap();
+        }
+        if window.keyboard()[Key::E].is_down() {
+            self.system.borrow_mut::<Camera>(self.camera_id).map(|cam| cam.height -= delta_time as f32).unwrap();
+        }
+
+        if window.keyboard()[Key::N].is_down() {
+            self.world.rock_density -= delta_time;
+            println!("Rock Density: {}", self.world.rock_density);
+        }
+
+        if window.keyboard()[Key::M].is_down() {
+            self.world.rock_density += delta_time;
+            println!("Rock Density: {}", self.world.rock_density);
+        }
 
         Ok(())
     }
