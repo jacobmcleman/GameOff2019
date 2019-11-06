@@ -49,11 +49,37 @@ struct Camera {
     height: f32
 }
 
+// Must be power of 2
+const PARTITION_SIZE: u8 = (1 << 4);
+
+struct AreaChanges {
+    // TODO: Implement array mode for this structure for areas of dense change
+    changes: HashMap<GridCoord, TileValue>
+}
+
+impl AreaChanges {
+    fn new() -> AreaChanges {
+        AreaChanges { changes: HashMap::new() }
+    }
+
+    fn sample(&self, pos: &GridCoord) -> Option<&TileValue> {
+        // For now this just forwards the query to the internal hashmap
+        // In future once a second storage type is available this will have to use the correct one
+        self.changes.get(&pos)
+    }
+
+    fn add_change(&mut self, pos: &GridCoord, tile_value: &TileValue) {
+        // Insert will overwrite old values with that key, so this is just always the correct option
+        // TODO: add storage type switch here before insert
+        self.changes.insert(pos.clone(), tile_value.clone());
+    }
+}
+
 struct TileMap {
     generator_func: HybridMulti,
     rock_density: f64,
     tile_drawables: HashMap<TileValue, Color>,
-    selected_tile: GridCoord
+    selected_tile: GridCoord,
     // TODO add map changes data structure here
     // Concept: Since changes will likely concentrated in a few areas, but there may be small changes all over the map
     // Spatial partition by zeroing out the last ~4 bits of a position (16x16 groups) and then 
@@ -66,6 +92,7 @@ struct TileMap {
     // Game saving thoughts: 
     //      - Could also use this partitioning to not load whole save files on start up, load more lazily
     //      - Alternatively, could ignore the partitioning for the save files to make it easier to tweak things like sizes and internal behavior later (don't save 2d arrays just a bunch o changes)
+    map_changes: HashMap<GridCoord, AreaChanges>
 
     // TODO cache world sample queries
     // Re-generating untouched space and/or re-querying the changes data is expensive, so lets not do that every frame for every visible tile
@@ -78,6 +105,7 @@ struct GameplayState {
     camera_id: EntityId
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 struct GridCoord {
     x: i64,
     y: i64
@@ -93,24 +121,38 @@ impl TileMap {
             (TileValue::Error, Color::MAGENTA)
         ].iter().cloned().collect();
 
-        TileMap { generator_func, rock_density: 0.5, tile_drawables, selected_tile: GridCoord{ x: 0, y: 0 } }
+        TileMap { generator_func, rock_density: 0.5, tile_drawables, selected_tile: GridCoord{ x: 0, y: 0 }, map_changes: HashMap::new() }
     }
 
-    fn sample(&self, pos: GridCoord) -> TileValue {
+    fn sample(&self, pos: &GridCoord) -> &TileValue {
         // Unwrap values from struct
         let x = pos.x;
         let y = pos.y;
 
-        // TODO: Sample world edits list here
+        // Mask away the bits 
+        let partition_x = x & !(PARTITION_SIZE as i64 - 1);
+        let partition_y = y & !(PARTITION_SIZE as i64 - 1);
+        let partition_coord = GridCoord { x: partition_x, y: partition_y };
+
+        // Check the history for a matching change
+        // First see if there is any changes within this tiles partition
+        if self.map_changes.contains_key(&partition_coord)  {
+            // Ask the partition if there is a value for this tile
+            let tile_value: Option<&TileValue> = self.map_changes.get(&partition_coord).unwrap().sample(pos);
+            if tile_value.is_some() {
+                // There is a changed value in this tile, use that
+                return tile_value.unwrap();
+            }
+        }
 
         // If no edits have been applied to this tile, sample the noise function to decide what goes here
         // Noise is from -1..1 but I only want 0..1 so shift it first
         let value = ((self.generator_func.get([x as f64, y as f64]) + 1.0) / (2.0 + self.rock_density)).round();
         let value = if value > 1.0 { 1.0 } else if value < 0.0 { 0.0 } else { value };
         match value as i32 {
-            0 => TileValue::Empty,
-            1 => TileValue::Rock,
-            _ => TileValue::Error
+            0 => &TileValue::Empty,
+            1 => &TileValue::Rock,
+            _ => &TileValue::Error
         }
     }
 
@@ -137,7 +179,7 @@ impl TileMap {
         for x in x_min..x_max {
             for y in y_min..y_max {
                 let coord = GridCoord {x, y};
-                let col: Color = match self.tile_drawables.get(&self.sample(coord)) { Some(c) => c.clone(), _ => Color::MAGENTA };
+                let col: Color = match self.tile_drawables.get(self.sample(&coord)) { Some(c) => c.clone(), _ => Color::MAGENTA };
                 window.draw_ex(&rect, Col(col), Transform::translate((x as f32, y as f32)), 0);
             }
         }
@@ -148,6 +190,26 @@ impl TileMap {
 
     fn  pos_to_grid(&self, world_x: f32 , world_y: f32) -> GridCoord {
         GridCoord { x: world_x as i64, y: world_y as i64}
+    }
+
+    fn make_change(&mut self, pos: &GridCoord, new_value: &TileValue) {
+        // Unwrap values from struct
+        let x = pos.x;
+        let y = pos.y;
+
+        // Mask away the bits 
+        let partition_x = x & !(PARTITION_SIZE as i64 - 1);
+        let partition_y = y & !(PARTITION_SIZE as i64 - 1);
+        let partition_coord = GridCoord { x: partition_x, y: partition_y };
+
+        // First ensure there is a change table for this partition
+        if !self.map_changes.contains_key(&partition_coord)  {
+            self.map_changes.insert(partition_coord, AreaChanges::new());
+        }
+
+        // Safe to unwrap immediately because we know at this point the key is in the table
+        let partition_changes = self.map_changes.get_mut(&partition_coord).unwrap();
+        partition_changes.add_change(pos, new_value);
     }
 }
 
@@ -250,7 +312,16 @@ impl State for GameplayState {
             println!("Rock Density: {}", self.world.rock_density);
         }
 
-        self.world.selected_tile = self. world.pos_to_grid(window.mouse().pos().x, window.mouse().pos().y);
+        let selected_tile = self. world.pos_to_grid(window.mouse().pos().x, window.mouse().pos().y);
+
+        if window.keyboard()[Key::Space].is_down() {
+            self.world.make_change(&selected_tile, &TileValue::Error);
+        }
+
+        // Dont' store the selected tile position on the world until later because reading that to make a change requires reading from it 
+        // but you can't do that at the same time as writing to the world with make change
+        // (you totally could since the data is in different parts of the struct but this is rust and you can't make a mutable reference at the same time as an immutable one)
+        self.world.selected_tile = selected_tile;
 
         Ok(())
     }
