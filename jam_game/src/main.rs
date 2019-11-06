@@ -55,7 +55,7 @@ struct TileMap {
     tile_drawables: HashMap<TileValue, Color>,
     selected_tile: GridCoord
     // TODO add map changes data structure here
-    // Concept: Since changes will likely concentrated in a few areas, but there may 
+    // Concept: Since changes will likely concentrated in a few areas, but there may be small changes all over the map
     // Spatial partition by zeroing out the last ~4 bits of a position (16x16 groups) and then 
     // for sparse changes (a few mined rocks) - do a hash table to find any changes within those 256 tiles (sparse storage, slower but less memory used)
     // for dense areas (a base) - Keep a 2D array of all 256 tiles in this chunk (and save that whole thing)
@@ -63,6 +63,9 @@ struct TileMap {
     //      - switch should be before the point where hash collisions start being likely
     //      - should delay as much as sensible, 2D array will be much bigger memory hog and not scale well
     //      - the main tiles that a players base is on should definitely be in the array once it expands, so looking at common bases seems like a good way to tune this
+    // Game saving thoughts: 
+    //      - Could also use this partitioning to not load whole save files on start up, load more lazily
+    //      - Alternatively, could ignore the partitioning for the save files to make it easier to tweak things like sizes and internal behavior later (don't save 2d arrays just a bunch o changes)
 
     // TODO cache world sample queries
     // Re-generating untouched space and/or re-querying the changes data is expensive, so lets not do that every frame for every visible tile
