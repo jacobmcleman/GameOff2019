@@ -54,6 +54,19 @@ struct TileMap {
     rock_density: f64,
     tile_drawables: HashMap<TileValue, Color>,
     selected_tile: GridCoord
+    // TODO add map changes data structure here
+    // Concept: Since changes will likely concentrated in a few areas, but there may 
+    // Spatial partition by zeroing out the last ~4 bits of a position (16x16 groups) and then 
+    // for sparse changes (a few mined rocks) - do a hash table to find any changes within those 256 tiles (sparse storage, slower but less memory used)
+    // for dense areas (a base) - Keep a 2D array of all 256 tiles in this chunk (and save that whole thing)
+    // The exact switchover point should be tuned over time, but things to consider while doing that are:
+    //      - switch should be before the point where hash collisions start being likely
+    //      - should delay as much as sensible, 2D array will be much bigger memory hog and not scale well
+    //      - the main tiles that a players base is on should definitely be in the array once it expands, so looking at common bases seems like a good way to tune this
+
+    // TODO cache world sample queries
+    // Re-generating untouched space and/or re-querying the changes data is expensive, so lets not do that every frame for every visible tile
+    // Cache sizing still needs to be figured out - could be dynamic with camera size or just always big enough for max zoom
 }
 
 struct GameplayState {
@@ -126,6 +139,7 @@ impl TileMap {
             }
         }
 
+        // Draw a circle on the currently highlighted tile
         window.draw(&Circle::new((self.selected_tile.x as f32 + 0.5, self.selected_tile.y as f32 + 0.5), 0.5), Col(Color::RED));
     }
 
