@@ -52,13 +52,19 @@ struct Camera {
 struct TileMap {
     generator_func: HybridMulti,
     rock_density: f64,
-    tile_drawables: HashMap<TileValue, Color>
+    tile_drawables: HashMap<TileValue, Color>,
+    selected_tile: GridCoord
 }
 
 struct GameplayState {
     system: Ecs,
     world: TileMap,
     camera_id: EntityId
+}
+
+struct GridCoord {
+    x: i64,
+    y: i64
 }
 
 impl TileMap {
@@ -71,16 +77,21 @@ impl TileMap {
             (TileValue::Error, Color::MAGENTA)
         ].iter().cloned().collect();
 
-        TileMap { generator_func, rock_density: 0.5, tile_drawables }
+        TileMap { generator_func, rock_density: 0.5, tile_drawables, selected_tile: GridCoord{ x: 0, y: 0 } }
     }
 
-    fn sample(&self, x: i32, y: i32) -> TileValue {
+    fn sample(&self, pos: GridCoord) -> TileValue {
+        // Unwrap values from struct
+        let x = pos.x;
+        let y = pos.y;
+
         // TODO: Sample world edits list here
 
         // If no edits have been applied to this tile, sample the noise function to decide what goes here
         // Noise is from -1..1 but I only want 0..1 so shift it first
-        let value = (self.generator_func.get([x as f64, y as f64]) + 1.0) / (2.0 + self.rock_density);
-        match value.round() as i32 {
+        let value = ((self.generator_func.get([x as f64, y as f64]) + 1.0) / (2.0 + self.rock_density)).round();
+        let value = if value > 1.0 { 1.0 } else if value < 0.0 { 0.0 } else { value };
+        match value as i32 {
             0 => TileValue::Empty,
             1 => TileValue::Rock,
             _ => TileValue::Error
@@ -98,20 +109,28 @@ impl TileMap {
         // TODO: Consider double size tiles at low zoom for LOD
 
         // Bounds to draw between
-        let x_min = view_box.pos.x.floor() as i32;
-        let x_max =(view_box.pos.x + view_box.size.x).ceil() as i32;
-        let y_min = view_box.pos.y.floor() as i32;
-        let y_max =(view_box.pos.y + view_box.size.y).ceil() as i32;
+        let x_min = view_box.pos.x.floor() as i64;
+        let x_max =(view_box.pos.x + view_box.size.x).ceil() as i64;
+        let y_min = view_box.pos.y.floor() as i64;
+        let y_max =(view_box.pos.y + view_box.size.y).ceil() as i64;
 
+        // Rectangle to reuse to maybe avoid constant re-allocation?
         let rect = Rectangle::new_sized((1, 1));
         
         // Draw one sprite rectangle for each tile within the bounds
         for x in x_min..x_max {
             for y in y_min..y_max {
-                let col: Color = match self.tile_drawables.get(&self.sample(x, y)) { Some(c) => c.clone(), _ => Color::MAGENTA };
-                window.draw_ex(&rect, Col(col), Transform::translate((x, y)), 0);
+                let coord = GridCoord {x, y};
+                let col: Color = match self.tile_drawables.get(&self.sample(coord)) { Some(c) => c.clone(), _ => Color::MAGENTA };
+                window.draw_ex(&rect, Col(col), Transform::translate((x as f32, y as f32)), 0);
             }
         }
+
+        window.draw(&Circle::new((self.selected_tile.x as f32 + 0.5, self.selected_tile.y as f32 + 0.5), 0.5), Col(Color::RED));
+    }
+
+    fn  pos_to_grid(&self, world_x: f32 , world_y: f32) -> GridCoord {
+        GridCoord { x: world_x as i64, y: world_y as i64}
     }
 }
 
@@ -143,7 +162,7 @@ impl State for GameplayState {
         let screen_size = window.screen_size();
         let aspect_ratio = screen_size.x / screen_size.y;
 
-        // Get the ids of components that have both a transform and a keyboard mover
+        // Feed the camera to the view controller on the window
         let camera: &Camera = self.system.borrow(self.camera_id).unwrap();
         let transform: &TransformComponent = self.system.borrow(self.camera_id).unwrap();
         let cam_rect = Rectangle::new(transform.position, (camera.height * aspect_ratio, camera.height));
@@ -213,6 +232,8 @@ impl State for GameplayState {
             self.world.rock_density += delta_time;
             println!("Rock Density: {}", self.world.rock_density);
         }
+
+        self.world.selected_tile = self. world.pos_to_grid(window.mouse().pos().x, window.mouse().pos().y);
 
         Ok(())
     }
