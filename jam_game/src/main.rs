@@ -70,11 +70,10 @@ impl State for GameplayState {
         let _ = system.set(camera_ent, TransformComponent { position: Vector::new(100, 100), rotation: 0.0, scale: Vector::new(100, 100) });
         let _ = system.set(camera_ent, KeyboardMove { speed: 2.5 });
         let _ = system.set(camera_ent, Camera { height: 10.0 });
-
         
         let tile_colors:  HashMap<TileValue, Color> = [
             (TileValue::Empty, Color::from_rgba(127, 127, 127, 1.0)),
-            (TileValue::Rock, Color::from_rgba(227, 227, 227, 1.0)),
+            (TileValue::Rock, Color::from_rgba(67, 67, 67, 1.0)),
             (TileValue::Error, Color::MAGENTA)
         ].iter().cloned().collect();
 
@@ -172,7 +171,7 @@ impl State for GameplayState {
         let selected_tile = self. world.pos_to_grid(window.mouse().pos().x, window.mouse().pos().y);
 
         if window.keyboard()[Key::Space].is_down() {
-            self.world.make_change(&selected_tile, &TileValue::Error);
+            self.world.make_change(&selected_tile, &TileValue::Empty);
         }
 
         // Dont' store the selected tile position on the world until later because reading that to make a change requires reading from it 

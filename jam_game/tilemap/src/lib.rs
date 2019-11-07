@@ -79,6 +79,8 @@ pub mod tile_world {
             let x = pos.x;
             let y = pos.y;
 
+            // TODO: Check a cache before doing all this querying
+
             // Mask away the bits 
             let partition_x = x & !(PARTITION_SIZE as i64 - 1);
             let partition_y = y & !(PARTITION_SIZE as i64 - 1);
@@ -154,6 +156,8 @@ pub mod tile_world {
             // Safe to unwrap immediately because we know at this point the key is in the table
             let partition_changes = self.map_changes.get_mut(&partition_coord).unwrap();
             partition_changes.add_change(pos, new_value);
+
+            // TODO: Put the new value in cache because presumably someone's going to want to know about this change
         }
     }
 }
