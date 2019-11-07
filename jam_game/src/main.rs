@@ -2,16 +2,17 @@ extern crate quicksilver;
 #[macro_use]
 extern crate recs;
 use recs::{Ecs, EntityId};
+use std::collections::HashMap;
 
 extern crate tilemap;
 
 use tilemap::tile_world::{
-    TileMap, TileValue
+    TileMap, TileValue, GridCoord
 };
 
 use quicksilver::{
     Result,
-    geom::{Circle, Rectangle, Vector},
+    geom::{Circle, Rectangle, Vector, Transform},
     graphics::{Background::Col, Color, View},
     input::{Key},
     lifecycle::{Settings, State, Window, run},
@@ -49,7 +50,8 @@ struct Camera {
 struct GameplayState {
     system: Ecs,
     world: TileMap,
-    camera_id: EntityId
+    camera_id: EntityId,
+    tile_colors: HashMap<TileValue, Color>
 }
 
 fn draw(window: &mut Window, sprite: &Sprite, transform: &TransformComponent) {
@@ -69,7 +71,14 @@ impl State for GameplayState {
         let _ = system.set(camera_ent, KeyboardMove { speed: 2.5 });
         let _ = system.set(camera_ent, Camera { height: 10.0 });
 
-        Ok( GameplayState{ system, world: TileMap::new(), camera_id: camera_ent } )
+        
+        let tile_colors:  HashMap<TileValue, Color> = [
+            (TileValue::Empty, Color::from_rgba(127, 127, 127, 1.0)),
+            (TileValue::Rock, Color::from_rgba(227, 227, 227, 1.0)),
+            (TileValue::Error, Color::MAGENTA)
+        ].iter().cloned().collect();
+
+        Ok( GameplayState{ system, world: TileMap::new(), camera_id: camera_ent, tile_colors } )
     }
 
     fn draw(&mut self, window: &mut Window) -> Result<()> {
@@ -86,8 +95,17 @@ impl State for GameplayState {
         let cam_rect = Rectangle::new(transform.position, (camera.height * aspect_ratio, camera.height));
         window.set_view(View::new(cam_rect));
 
+        // Rectangle to reuse to maybe avoid constant re-allocation? Not actually sure if this is an optimization
+        let rect = Rectangle::new_sized((1, 1));
+
         // Draw the tilemap first as a background
-        self.world.draw(window, &cam_rect);
+        self.world.for_each_tile(&cam_rect, |pos: &GridCoord, value: &TileValue| {
+            let col: Color = match self.tile_colors.get(value) { Some(c) => c.clone(), _ => Color::MAGENTA };
+            window.draw_ex(&rect, Col(col), Transform::translate((pos.x as f32, pos.y as f32)), 0);
+        });
+        
+        // Draw a circle on the currently highlighted tile
+        window.draw(&Circle::new((self.world.selected_tile.x as f32 + 0.5, self.world.selected_tile.y as f32 + 0.5), 0.5), Col(Color::RED));
 
         // Get the ids of components that have both a transform and a sprite (everything needed to draw)
         let mut drawable_ids: Vec<EntityId> = Vec::new();

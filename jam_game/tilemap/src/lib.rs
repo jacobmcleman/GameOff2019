@@ -4,11 +4,7 @@ pub mod tile_world {
     use noise::{NoiseFn, HybridMulti};
     use std::collections::HashMap;
 
-    use quicksilver::{
-        geom::{Circle, Rectangle, Transform},
-        graphics::{Background::Col, Color},
-        lifecycle::{Window},
-    };
+    use quicksilver::geom::Rectangle;
 
     #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
     pub struct GridCoord {
@@ -22,7 +18,7 @@ pub mod tile_world {
         Rock,
         Error
     }
-    
+
     // Must be power of 2
     const PARTITION_SIZE: u8 = (1 << 4);
 
@@ -35,7 +31,6 @@ pub mod tile_world {
         pub rock_density: f64,
         pub selected_tile: GridCoord,
         generator_func: HybridMulti,
-        tile_drawables: HashMap<TileValue, Color>,
         // TODO add map changes data structure here
         // Concept: Since changes will likely concentrated in a few areas, but there may be small changes all over the map
         // Spatial partition by zeroing out the last ~4 bits of a position (16x16 groups) and then 
@@ -76,14 +71,7 @@ pub mod tile_world {
     impl TileMap {
         pub fn new() -> TileMap {
             let generator_func = HybridMulti::new();
-
-            let tile_drawables:  HashMap<TileValue, Color> = [
-                (TileValue::Empty, Color::from_rgba(127, 127, 127, 1.0)),
-                (TileValue::Rock, Color::from_rgba(227, 227, 227, 1.0)),
-                (TileValue::Error, Color::MAGENTA)
-            ].iter().cloned().collect();
-
-            TileMap { generator_func, rock_density: 0.5, tile_drawables, selected_tile: GridCoord{ x: 0, y: 0 }, map_changes: HashMap::new() }
+            TileMap { generator_func, rock_density: 0.5, selected_tile: GridCoord{ x: 0, y: 0 }, map_changes: HashMap::new() }
         }
 
         pub fn sample(&self, pos: &GridCoord) -> &TileValue {
@@ -118,7 +106,9 @@ pub mod tile_world {
             }
         }
 
-        pub fn draw(&self, window: &mut Window, view_box: &Rectangle) {
+
+        pub fn for_each_tile<F>(&self, bounds: &Rectangle, mut func: F)
+            where F : FnMut(&GridCoord, &TileValue) {
             // TODO: Optimize the shit out of this
             /* Ideas for this: 
                 - Don't need to resample noise very frame since most of the tiles are the same, only need to sample on the edges or when there is a change
@@ -126,28 +116,20 @@ pub mod tile_world {
                 - Use faster noise function
                 - Is the color copy slow?
             */
-            // TODO: Consider double size tiles at low zoom for LOD
 
             // Bounds to draw between
-            let x_min = view_box.pos.x.floor() as i64;
-            let x_max =(view_box.pos.x + view_box.size.x).ceil() as i64;
-            let y_min = view_box.pos.y.floor() as i64;
-            let y_max =(view_box.pos.y + view_box.size.y).ceil() as i64;
-
-            // Rectangle to reuse to maybe avoid constant re-allocation?
-            let rect = Rectangle::new_sized((1, 1));
+            let x_min = bounds.pos.x.floor() as i64;
+            let x_max =(bounds.pos.x + bounds.size.x).ceil() as i64;
+            let y_min = bounds.pos.y.floor() as i64;
+            let y_max =(bounds.pos.y + bounds.size.y).ceil() as i64;
             
             // Draw one sprite rectangle for each tile within the bounds
             for x in x_min..x_max {
                 for y in y_min..y_max {
                     let coord = GridCoord {x, y};
-                    let col: Color = match self.tile_drawables.get(self.sample(&coord)) { Some(c) => c.clone(), _ => Color::MAGENTA };
-                    window.draw_ex(&rect, Col(col), Transform::translate((x as f32, y as f32)), 0);
+                    func(&coord, self.sample(&coord));
                 }
             }
-
-            // Draw a circle on the currently highlighted tile
-            window.draw(&Circle::new((self.selected_tile.x as f32 + 0.5, self.selected_tile.y as f32 + 0.5), 0.5), Col(Color::RED));
         }
 
         pub fn pos_to_grid(&self, world_x: f32 , world_y: f32) -> GridCoord {
@@ -182,6 +164,10 @@ mod tests {
         TileMap, TileValue, GridCoord
     };
 
+    use quicksilver::{
+        geom::{Rectangle},
+    };
+
     #[test]
     fn empty_map_access_gives_empty() {
         let map = TileMap::new();
@@ -203,5 +189,26 @@ mod tests {
         assert_eq!(map.pos_to_grid(-0.1, -0.1), GridCoord{x: 0, y: 0});
         assert_eq!(map.pos_to_grid(0.6, -0.6), GridCoord{x: 0, y: 0});
         assert_eq!(map.pos_to_grid(1.0, 1.0), GridCoord{x: 1, y: 1});
+    }
+
+    #[test]
+    fn for_each_tile_bounds_gets_all() {
+        let map = TileMap::new();
+        // Create a rectangle from (0, 0) to (10, 10)
+        let bounds = Rectangle::new_sized((10, 10));
+        let mut tiles_hit: u32 = 0;
+
+        let min_val = 0;
+        let max_val = 10;
+
+        map.for_each_tile(&bounds, |pos: &GridCoord, _value: &TileValue| {
+            tiles_hit += 1;
+            assert!(pos.x >= min_val, "Expected X greater than {}, got {}", min_val, pos.x);
+            assert!(pos.x <= max_val, "Expected X less than {}, got {}", max_val, pos.x);
+            assert!(pos.y >= min_val, "Expected Y greater than {}, got {}", min_val, pos.y);
+            assert!(pos.y <= max_val, "Expected Y less than {}, got {}", max_val, pos.y);
+        });
+
+        assert_eq!(tiles_hit, 100);
     }
 }
