@@ -17,15 +17,21 @@ pub mod tile_world {
     pub enum TileValue {
         Empty,
         Rock,
-        Error
+        Error,
+        InternalUnknown // Special value for when using dense storage for values that have not yet been computed
     }
 
     // Must be power of 2
-    const PARTITION_SIZE: u8 = (1 << 4);
+    pub const PARTITION_SIZE: u8 = (1 << 4);
+
+    // Length of table at which the storage mode should switch to dense storage
+    pub const DENSE_SWITCH_POINT: u32 = ((PARTITION_SIZE as u32) * (PARTITION_SIZE as u32)) / 3;
 
     pub struct AreaChanges {
         // TODO: Implement array mode for this structure for areas of dense change
-        changes: HashMap<GridCoord, TileValue>
+        changes_map: HashMap<u16, TileValue>,
+        changes_vec: Vec<TileValue>,
+        using_dense_storage: bool
     }
 
     pub struct TileMap {
@@ -49,24 +55,95 @@ pub mod tile_world {
         // TODO cache world sample queries
         // Re-generating untouched space and/or re-querying the changes data is expensive, so lets not do that every frame for every visible tile
         // Cache sizing still needs to be figured out - could be dynamic with camera size or just always big enough for max zoom
-        tile_cache: LruCache<GridCoord, TileValue>
+        tile_cache: LruCache<GridCoord, TileValue>,
+        caching_enabled: bool
     }
 
     impl AreaChanges {
-        fn new() -> AreaChanges {
-            AreaChanges { changes: HashMap::new() }
+        pub fn new() -> AreaChanges {
+            AreaChanges { 
+                changes_map: HashMap::new(), 
+                changes_vec: Vec::new(), 
+                using_dense_storage: false 
+            }
         }
 
-        fn sample(&self, pos: &GridCoord) -> Option<&TileValue> {
-            // For now this just forwards the query to the internal hashmap
-            // In future once a second storage type is available this will have to use the correct one
-            self.changes.get(&pos)
+        pub fn sample(&self, pos: &GridCoord) -> Option<TileValue> {
+            let internal_pos_x = (pos.x & (PARTITION_SIZE as i64 - 1)) as u8;
+            let internal_pos_y = (pos.y & (PARTITION_SIZE as i64 - 1)) as u8;
+
+            if self.using_dense_storage {
+                let index = internal_pos_x as usize + ((PARTITION_SIZE as usize) * (internal_pos_y as usize));
+                let lookup_result = self.changes_vec[index];
+                if lookup_result == TileValue::InternalUnknown { None }
+                else { Some(lookup_result) }
+            }
+            else {
+                let internal_key = ((internal_pos_x as u16) << 8) | (internal_pos_y as u16);
+                // For now this just forwards the query to the internal hashmap
+                // In future once a second storage type is available this will have to use the correct one
+                match self.changes_map.get(&internal_key) {
+                    Some(key) => Some(key.clone()),
+                    None => None
+                }
+            }
         }
 
-        fn add_change(&mut self, pos: &GridCoord, tile_value: &TileValue) {
-            // Insert will overwrite old values with that key, so this is just always the correct option
-            // TODO: add storage type switch here before insert
-            self.changes.insert(pos.clone(), tile_value.clone());
+        pub fn add_change(&mut self, pos: &GridCoord, tile_value: &TileValue) {
+            let internal_pos_x = (pos.x & (PARTITION_SIZE as i64 - 1)) as u8;
+            let internal_pos_y = (pos.y & (PARTITION_SIZE as i64 - 1)) as u8;
+
+            if self.using_dense_storage {
+                let index = internal_pos_x as usize + ((PARTITION_SIZE as usize) * (internal_pos_y as usize));
+                self.changes_vec[index] = *tile_value;
+            }
+            else {
+                if self.changes_map.len() > DENSE_SWITCH_POINT as usize {
+                    self.switch_to_dense();
+                    // Mode switched, go back around
+                    self.add_change(pos, tile_value);
+                }
+                else {
+                    let internal_key = ((internal_pos_x as u16) << 8) | (internal_pos_y as u16);
+
+                    // Insert will overwrite old values with that key, so this is just always the correct option
+                    self.changes_map.insert(internal_key, tile_value.clone());
+                }
+            }
+            
+        }
+
+        fn switch_to_dense(&mut self) {
+            if self.using_dense_storage { return; }
+
+            self.changes_vec.resize((PARTITION_SIZE as usize) * (PARTITION_SIZE as usize), TileValue::InternalUnknown);
+
+            for (key, val) in self.changes_map.iter() {
+                let internal_pos_x = key >> 8;
+                let internal_pos_y = key & ((1 << 8) - 1);
+                let index = internal_pos_x as usize + ((PARTITION_SIZE as usize) * (internal_pos_y as usize));
+                self.changes_vec[index] = *val;
+            }
+
+            self.changes_map.clear();
+            self.changes_map.shrink_to_fit();
+            self.using_dense_storage = true;
+        }
+
+        fn switch_to_sparse(&mut self) {
+            if !self.using_dense_storage { return; }
+
+            for x in 0..PARTITION_SIZE {
+                for y in 0..PARTITION_SIZE {
+                    let index = x as usize + ((PARTITION_SIZE as usize) * (y as usize));
+                    let internal_key = ((x as u16) << 8) | (y as u16);
+                    self.changes_map.insert(internal_key, self.changes_vec[index]);
+                }
+            }
+
+            self.changes_vec.clear();
+            self.changes_vec.shrink_to_fit();
+            self.using_dense_storage = false;
         }
     }
 
@@ -78,7 +155,8 @@ pub mod tile_world {
                 rock_density: 0.5, 
                 selected_tile: GridCoord{ x: 0, y: 0 }, 
                 map_changes: HashMap::new(), 
-                tile_cache: LruCache::new(256) 
+                tile_cache: LruCache::new(256),
+                caching_enabled: true
             }
         }
 
@@ -87,8 +165,8 @@ pub mod tile_world {
             let x = pos.x;
             let y = pos.y;
 
-            // TODO: Check a cache before doing all the work of looking up the stored data
-            let cache_result = self.tile_cache.get(pos);
+            // Check cache (if enabled) before doing all the work of looking up the stored data
+            let cache_result: Option<&TileValue> = if self.caching_enabled { self.tile_cache.get(pos) } else { None };
 
             if cache_result.is_some() {
                 return cache_result.unwrap().clone();
@@ -103,10 +181,10 @@ pub mod tile_world {
                 // First see if there is any changes within this tiles partition
                 if self.map_changes.contains_key(&partition_coord)  {
                     // Ask the partition if there is a value for this tile
-                    let tile_value: Option<&TileValue> = self.map_changes.get(&partition_coord).unwrap().sample(pos);
+                    let tile_value: Option<TileValue> = self.map_changes.get(&partition_coord).unwrap().sample(pos);
                     if tile_value.is_some() {
                         // There is a changed value in this tile, use that
-                        return tile_value.unwrap().clone();
+                        return tile_value.unwrap();
                     }
                 }
 
@@ -120,7 +198,9 @@ pub mod tile_world {
                     _ => TileValue::Error
                 };
 
-                self.tile_cache.put(*pos, tile_val);
+                if self.caching_enabled {
+                    self.tile_cache.put(*pos, tile_val);
+                }
 
                 return tile_val;
             }
@@ -176,7 +256,9 @@ pub mod tile_world {
             partition_changes.add_change(pos, new_value);
 
             // Put the new value in cache because presumably someone's going to want to know about this change
-            self.tile_cache.put(*pos, *new_value);
+            if self.caching_enabled {
+                self.tile_cache.put(*pos, *new_value);
+            }
         }
 
         // If new size is smaller, elements will be dropped
@@ -189,7 +271,7 @@ pub mod tile_world {
 #[cfg(test)]
 mod tests {
     use crate::tile_world::{
-        TileMap, TileValue, GridCoord
+        TileMap, TileValue, GridCoord, AreaChanges, PARTITION_SIZE, DENSE_SWITCH_POINT
     };
 
     use quicksilver::{
@@ -235,10 +317,10 @@ mod tests {
         let mut map = TileMap::new();
 
         // Large bounds but still within a single cache
-        let x_min: i64 = 0;
-        let x_max: i64 = 10;
-        let y_min: i64 = 0;
-        let y_max: i64 = 10;
+        let x_min: i64 = -5;
+        let x_max: i64 = 5;
+        let y_min: i64 = -5;
+        let y_max: i64 = 5;
         
         for x in x_min..x_max {
             for y in y_min..y_max {
@@ -258,10 +340,10 @@ mod tests {
         let mut map = TileMap::new();
 
         // Large bounds but still within a single cache
-        let x_min: i64 = 0;
-        let x_max: i64 = 10;
-        let y_min: i64 = 0;
-        let y_max: i64 = 10;
+        let x_min: i64 = -5;
+        let x_max: i64 = 5;
+        let y_min: i64 = -5;
+        let y_max: i64 = 5;
         
         for x in x_min..x_max {
             for y in y_min..y_max {
@@ -281,10 +363,10 @@ mod tests {
         let mut map = TileMap::new();
 
         // Bounds big enough to be waaay beyond the cache
-        let x_min: i64 = 0;
-        let x_max: i64 = 100;
-        let y_min: i64 = 0;
-        let y_max: i64 = 100;
+        let x_min: i64 = -50;
+        let x_max: i64 = 50;
+        let y_min: i64 = -50;
+        let y_max: i64 = 50;
         
         for x in x_min..x_max {
             for y in y_min..y_max {
@@ -328,5 +410,31 @@ mod tests {
         });
 
         assert_eq!(tiles_hit, 100);
+    }
+
+    #[test]
+    fn sample_from_switched_dense() {
+        let mut partition = AreaChanges::new();
+
+        // Change 3/4 of the tiles
+        for x in 0..PARTITION_SIZE as i64 {
+            for y in 0..PARTITION_SIZE as i64 {
+                if x % 4 == 0 {
+                    partition.add_change(&GridCoord{x, y}, &TileValue::Empty);
+                }
+            }
+        }
+
+        // Test all the tiles
+        for x in 0..PARTITION_SIZE as i64 {
+            for y in 0..PARTITION_SIZE as i64 {
+                if x % 4 == 0 {
+                    assert_eq!(partition.sample(&GridCoord{x, y}), Some(TileValue::Empty), "Tile value at ({}, {}) lost!", x, y);
+                }
+                else {
+                    assert_eq!(partition.sample(&GridCoord{x, y}), None, "Tile value at ({}, {}) invented from nothing!", x, y);
+                }
+            }
+        }
     }
 }
