@@ -79,6 +79,7 @@ impl State for GameplayState {
 
         Ok( GameplayState{ system, world: TileMap::new(), camera_id: camera_ent, tile_colors } )
     }
+    
 
     fn draw(&mut self, window: &mut Window) -> Result<()> {
         window.clear(Color::BLACK)?;
@@ -95,11 +96,14 @@ impl State for GameplayState {
         window.set_view(View::new(cam_rect));
 
         // Rectangle to reuse to maybe avoid constant re-allocation? Not actually sure if this is an optimization
-        let rect = Rectangle::new_sized((1, 1));
+        let rect = Rectangle::new_sized((1, 1)); 
+
+        // TODO: figure out a better solution to this ownership snafu than copying the color table here
+        let color_table = self.tile_colors.clone();
 
         // Draw the tilemap first as a background
         self.world.for_each_tile(&cam_rect, |pos: &GridCoord, value: &TileValue| {
-            let col: Color = match self.tile_colors.get(value) { Some(c) => c.clone(), _ => Color::MAGENTA };
+            let col: Color = match color_table.get(value) { Some(c) => c.clone(), _ => Color::BLACK };
             window.draw_ex(&rect, Col(col), Transform::translate((pos.x as f32, pos.y as f32)), 0);
         });
         
@@ -157,6 +161,13 @@ impl State for GameplayState {
         if window.keyboard()[Key::E].is_down() {
             self.system.borrow_mut::<Camera>(self.camera_id).map(|cam| cam.height -= delta_time as f32).unwrap();
         }
+
+        // Update the cache size to ensure it can at least contain all currently drawn tiles
+        let screen_size = window.screen_size();
+        let aspect_ratio = screen_size.x / screen_size.y;
+        let camera: &Camera = self.system.borrow(self.camera_id).unwrap();
+        let screen_area = camera.height * (aspect_ratio * camera.height);
+        self.world.resize_cache((screen_area * 1.2) as usize);
 
         if window.keyboard()[Key::N].is_down() {
             self.world.rock_density -= delta_time;
