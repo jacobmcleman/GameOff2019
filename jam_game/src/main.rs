@@ -102,7 +102,7 @@ impl State for GameplayState {
         let color_table = self.tile_colors.clone();
 
         // Draw the tilemap first as a background
-        self.world.for_each_tile(&cam_rect, |pos: &GridCoord, value: &TileValue| {
+        self.world.for_each_tile_rect(&cam_rect, |pos: &GridCoord, value: &TileValue| {
             let col: Color = match color_table.get(value) { Some(c) => c.clone(), _ => Color::BLACK };
             window.draw_ex(&rect, Col(col), Transform::translate((pos.x as f32, pos.y as f32)), 0);
         });

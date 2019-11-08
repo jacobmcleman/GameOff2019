@@ -207,23 +207,26 @@ pub mod tile_world {
         }
 
 
-        pub fn for_each_tile<F>(&mut self, bounds: &Rectangle, mut func: F)
+        pub fn for_each_tile_rect<F>(&mut self, bounds: &Rectangle, mut func: F)
             where F : FnMut(&GridCoord, &TileValue) {
-            // TODO: Optimize the shit out of this
-            /* Ideas for this: 
-                - Don't need to resample noise very frame since most of the tiles are the same, only need to sample on the edges or when there is a change
-                - Don't need to make a new transform every frame either, same reason
-                - Use faster noise function
-                - Is the color copy slow?
-            */
-
             // Bounds to draw between
             let x_min = bounds.pos.x.floor() as i64;
-            let x_max =(bounds.pos.x + bounds.size.x).ceil() as i64;
+            let x_size = bounds.size.x.ceil() as i64;
             let y_min = bounds.pos.y.floor() as i64;
-            let y_max =(bounds.pos.y + bounds.size.y).ceil() as i64;
+            let y_size =bounds.size.y.ceil() as i64;
             
-            // Draw one sprite rectangle for each tile within the bounds
+            self.for_each_tile(&GridCoord{x: x_min, y: y_min}, &GridCoord{x: x_size, y: y_size}, func)
+        }
+
+        pub fn for_each_tile<F>(&mut self, top_left: &GridCoord, size: &GridCoord, mut func: F)
+            where F : FnMut(&GridCoord, &TileValue) {
+            // Bounds to draw between
+            let x_min = top_left.x;
+            let x_max = top_left.x + size.x;
+            let y_min = top_left.y;
+            let y_max = top_left.y + size.y;
+
+            // Call func once for each tile within the bounds
             for x in x_min..x_max {
                 for y in y_min..y_max {
                     let coord = GridCoord {x, y};
@@ -401,7 +404,7 @@ mod tests {
         let min_val = 0;
         let max_val = 10;
 
-        map.for_each_tile(&bounds, |pos: &GridCoord, _value: &TileValue| {
+        map.for_each_tile_rect(&bounds, |pos: &GridCoord, _value: &TileValue| {
             tiles_hit += 1;
             assert!(pos.x >= min_val, "Expected X greater than {}, got {}", min_val, pos.x);
             assert!(pos.x <= max_val, "Expected X less than {}, got {}", max_val, pos.x);

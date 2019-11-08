@@ -18,7 +18,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     c.bench_function("map_read_repeated", |b| b.iter(|| world.sample(&GridCoord{x: black_box(0), y: black_box(0)})));
     c.bench_function("map_write_repeated", |b| b.iter(|| world.make_change(&GridCoord{x: black_box(0), y: black_box(0)}, &TileValue::Error)));
     c.bench_function("read_write_read_repeated", |b| b.iter(|| {
-        let coord = GridCoord{x: rng.gen::<i64>(), y: rng.gen::<i64>()};
+        let coord = GridCoord{x: black_box(0), y: black_box(0)};
         world.sample(&coord);
         world.make_change(&coord, &TileValue::Error);
         world.sample(&coord);
@@ -40,6 +40,66 @@ fn criterion_benchmark(c: &mut Criterion) {
         world.sample(&coord);
         world.make_change(&coord, &TileValue::Error);
         world.sample(&coord);
+    }));
+
+    c.bench_function("read_small_screen_rect_sparse_place_empty_world", |b| b.iter(|| {
+        let coord = GridCoord{x: rng.gen::<i64>(), y: rng.gen::<i64>()};
+        let size = GridCoord{x: black_box(16), y: black_box(10)};
+        world.for_each_tile(&coord, &size, |pos, value| {
+            // Do something the doesn't know about so it can't optimize away these
+            black_box(pos);
+            black_box(value);
+        });
+    }));
+    c.bench_function("read_large_screen_rect_sparse_place_empty_world", |b| b.iter(|| {
+        let coord = GridCoord{x: rng.gen::<i64>(), y: rng.gen::<i64>()};
+        let size = GridCoord{x: black_box(80), y: black_box(50)};
+        world.for_each_tile(&coord, &size, |pos, value| {
+            // Do something the doesn't know about so it can't optimize away these
+            black_box(pos);
+            black_box(value);
+        });
+    }));
+
+    c.bench_function("read_small_screen_rect_dense_place_empty_world", |b| b.iter(|| {
+        let coord = GridCoord{x: rng.gen::<i64>() % 16, y: rng.gen::<i64>() % 16};
+        let size = GridCoord{x: black_box(16), y: black_box(10)};
+        world.for_each_tile(&coord, &size, |pos, value| {
+            // Do something the doesn't know about so it can't optimize away these
+            black_box(pos);
+            black_box(value);
+        });
+    }));
+
+    c.bench_function("read_large_screen_rect_dense_place_empty_world", |b| b.iter(|| {
+        let coord = GridCoord{x: rng.gen::<i64>() % 16, y: rng.gen::<i64>() % 16};
+        let size = GridCoord{x: black_box(80), y: black_box(50)};
+        world.for_each_tile(&coord, &size, |pos, value| {
+            // Do something the doesn't know about so it can't optimize away these
+            black_box(pos);
+            black_box(value);
+        });
+    }));
+
+    c.bench_function("read_small_screen_rect_repeat_place_empty_world", |b| b.iter(|| {
+        let coord = GridCoord{x: black_box(0), y: black_box(0)};
+        let size = GridCoord{x: black_box(16), y: black_box(10)};
+        world.for_each_tile(&coord, &size, |pos, value| {
+            // Do something the doesn't know about so it can't optimize away these
+            black_box(pos);
+            black_box(value);
+        });
+    }));
+
+    c.bench_function("read_large_screen_rect_repeat_place_empty_world", |b| b.iter(|| {
+        let coord = GridCoord{x: black_box(0), y: black_box(0)};
+        let size = GridCoord{x: black_box(80), y: black_box(50)};
+        world.for_each_tile(&coord, &size, |pos, value| {
+            // Do something the doesn't know about so it can't optimize away these
+            black_box(pos);
+            black_box(value);
+        });
+    
     }));
 }
 
