@@ -8,21 +8,21 @@ addons:
 env:
   global:
     - RUST_BACKTRACE=1
-rust:
-  - stable
-  - beta
-  - nightly
 jobs:
   include:
     - rust: stable
       os: linux
       env: WASM=0
       script: cd ./jam_game && cargo check --examples --no-default-features
-  include:
     - rust: stable
       os: linux
       env: WASM=0
       script: cd ./jam_game/tilemap && cargo check --examples --no-default-features && cargo test
-  allow_failures:
-    - rust: nightly
-  fast_finish: true
+    - rust: beta
+      os: linux
+      env: WASM=0
+      script: cd ./jam_game && cargo check --examples --no-default-features
+    - rust: beta
+      os: linux
+      env: WASM=0
+      script: cd ./jam_game/tilemap && cargo check --examples --no-default-features && cargo test
