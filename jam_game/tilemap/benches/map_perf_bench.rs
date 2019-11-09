@@ -45,59 +45,65 @@ fn criterion_benchmark(c: &mut Criterion) {
     c.bench_function("read_small_screen_rect_sparse_place_empty_world", |b| b.iter(|| {
         let coord = GridCoord{x: rng.gen::<i64>(), y: rng.gen::<i64>()};
         let size = GridCoord{x: black_box(16), y: black_box(10)};
-        world.for_each_tile(&coord, &size, |pos, value| {
+        world.for_each_tile(&coord, &size, |pos, value, size| {
             // Do something the doesn't know about so it can't optimize away these
             black_box(pos);
             black_box(value);
+            black_box(size);
         });
     }));
     c.bench_function("read_large_screen_rect_sparse_place_empty_world", |b| b.iter(|| {
         let coord = GridCoord{x: rng.gen::<i64>(), y: rng.gen::<i64>()};
         let size = GridCoord{x: black_box(80), y: black_box(50)};
-        world.for_each_tile(&coord, &size, |pos, value| {
+        world.for_each_tile(&coord, &size, |pos, value, size| {
             // Do something the doesn't know about so it can't optimize away these
             black_box(pos);
             black_box(value);
+            black_box(size);
         });
     }));
 
     c.bench_function("read_small_screen_rect_dense_place_empty_world", |b| b.iter(|| {
         let coord = GridCoord{x: rng.gen::<i64>() % 16, y: rng.gen::<i64>() % 16};
         let size = GridCoord{x: black_box(16), y: black_box(10)};
-        world.for_each_tile(&coord, &size, |pos, value| {
+        world.for_each_tile(&coord, &size, |pos, value, size| {
             // Do something the doesn't know about so it can't optimize away these
             black_box(pos);
             black_box(value);
+            black_box(size);
         });
     }));
 
     c.bench_function("read_large_screen_rect_dense_place_empty_world", |b| b.iter(|| {
         let coord = GridCoord{x: rng.gen::<i64>() % 16, y: rng.gen::<i64>() % 16};
         let size = GridCoord{x: black_box(80), y: black_box(50)};
-        world.for_each_tile(&coord, &size, |pos, value| {
+        world.for_each_tile(&coord, &size, |pos, value, size| {
             // Do something the doesn't know about so it can't optimize away these
             black_box(pos);
             black_box(value);
+            black_box(size);
         });
     }));
 
     c.bench_function("read_small_screen_rect_repeat_place_empty_world", |b| b.iter(|| {
         let coord = GridCoord{x: black_box(0), y: black_box(0)};
         let size = GridCoord{x: black_box(16), y: black_box(10)};
-        world.for_each_tile(&coord, &size, |pos, value| {
+        world.for_each_tile(&coord, &size, |pos, value, size| {
             // Do something the doesn't know about so it can't optimize away these
             black_box(pos);
             black_box(value);
+            black_box(size);
         });
     }));
 
     c.bench_function("read_large_screen_rect_repeat_place_empty_world", |b| b.iter(|| {
         let coord = GridCoord{x: black_box(0), y: black_box(0)};
         let size = GridCoord{x: black_box(80), y: black_box(50)};
-        world.for_each_tile(&coord, &size, |pos, value| {
+        world.for_each_tile(&coord, &size, |pos, value, size| {
             // Do something the doesn't know about so it can't optimize away these
             black_box(pos);
             black_box(value);
+            black_box(size);
         });
     
     }));

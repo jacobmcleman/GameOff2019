@@ -39,9 +39,7 @@ pub mod tile_world {
 
     pub struct TileMap {
         pub rock_density: f64,
-        pub selected_tile: GridCoord,
         generator_func: HybridMulti,
-        // TODO add map changes data structure here
         // Concept: Since changes will likely concentrated in a few areas, but there may be small changes all over the map
         // Spatial partition by zeroing out the last ~4 bits of a position (16x16 groups) and then 
         // for sparse changes (a few mined rocks) - do a hash table to find any changes within those 256 tiles (sparse storage, slower but less memory used)
@@ -54,8 +52,6 @@ pub mod tile_world {
         //      - Could also use this partitioning to not load whole save files on start up, load more lazily
         //      - Alternatively, could ignore the partitioning for the save files to make it easier to tweak things like sizes and internal behavior later (don't save 2d arrays just a bunch o changes)
         map_changes: HashMap<GridCoord, AreaChanges>,
-
-        // TODO cache world sample queries
         // Re-generating untouched space and/or re-querying the changes data is expensive, so lets not do that every frame for every visible tile
         // Cache sizing still needs to be figured out - could be dynamic with camera size or just always big enough for max zoom
         tile_cache: LruCache<GridCoord, TileValue>,
@@ -164,7 +160,6 @@ pub mod tile_world {
             TileMap { 
                 generator_func, 
                 rock_density: 0.25, 
-                selected_tile: GridCoord{ x: 0, y: 0 }, 
                 map_changes: HashMap::new(), 
                 tile_cache: LruCache::new(256),
                 caching_enabled: true,
@@ -239,7 +234,7 @@ pub mod tile_world {
 
 
         pub fn for_each_tile_rect<F>(&mut self, bounds: &Rectangle, func: F)
-            where F : FnMut(&GridCoord, &TileValue) {
+            where F : FnMut(&GridCoord, &TileValue, &GridCoord) {
             // Bounds to draw between
             let x_min = bounds.pos.x.floor() as i64;
             let x_size = bounds.size.x.ceil() as i64;
@@ -250,7 +245,7 @@ pub mod tile_world {
         }
 
         pub fn for_each_tile<F>(&mut self, top_left: &GridCoord, size: &GridCoord, mut func: F)
-            where F : FnMut(&GridCoord, &TileValue) {
+            where F : FnMut(&GridCoord, &TileValue, &GridCoord) {
             // Bounds to draw between
             let x_min = top_left.x;
             let x_max = top_left.x + size.x;
@@ -261,7 +256,9 @@ pub mod tile_world {
             for y in y_min..y_max {
                 for x in x_min..x_max {
                     let coord = GridCoord {x, y};
-                    func(&coord, &self.sample(&coord));
+                    let tile_value = self.sample(&coord);
+                    let size = self.get_tile_size(&tile_value);
+                    func(&coord, &tile_value, &size);
                 }
             }
         }
@@ -276,10 +273,7 @@ pub mod tile_world {
 
         pub fn make_change(&mut self, pos: &GridCoord, new_value: &TileValue) {
             let old_value = self.sample(pos);
-            let old_tile_size = match self.tile_type_sizes.get(&old_value) {
-                Some(size) => *size,
-                None => GridCoord{x: 1, y: 1}
-            };
+            let old_tile_size = self.get_tile_size(&old_value);
 
             if old_tile_size.x > 1 && old_tile_size.y > 1 {
                 let x_min = pos.x - (old_tile_size.x / 2);
@@ -288,10 +282,7 @@ pub mod tile_world {
                 self.set_area(&GridCoord{x: x_min, y: y_min}, &old_tile_size, TileValue::Empty );
             }
 
-            let tile_size = match self.tile_type_sizes.get(new_value) {
-                Some(size) => *size,
-                None => GridCoord{x: 1, y: 1}
-            };
+            let tile_size = self.get_tile_size(new_value);
 
             let x_min = pos.x - (tile_size.x / 2);
             let y_min = pos.y - (tile_size.y / 2);
@@ -342,6 +333,13 @@ pub mod tile_world {
         // If new size is smaller, elements will be dropped
         pub fn resize_cache(&mut self, new_size: usize) {
             self.tile_cache.resize(new_size);
+        }
+
+        pub fn get_tile_size(&self, tile_type: &TileValue) -> GridCoord {
+            match self.tile_type_sizes.get(&tile_type) {
+                Some(size) => *size,
+                None => GridCoord{x: 1, y: 1}
+            }
         }
     }
 }
@@ -486,7 +484,7 @@ mod tests {
         let min_val = 0;
         let max_val = 10;
 
-        map.for_each_tile_rect(&bounds, |pos: &GridCoord, _value: &TileValue| {
+        map.for_each_tile_rect(&bounds, |pos: &GridCoord, _value: &TileValue, _size: &GridCoord| {
             tiles_hit += 1;
             assert!(pos.x >= min_val, "Expected X greater than {}, got {}", min_val, pos.x);
             assert!(pos.x <= max_val, "Expected X less than {}, got {}", max_val, pos.x);
