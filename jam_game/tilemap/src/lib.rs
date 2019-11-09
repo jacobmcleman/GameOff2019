@@ -226,8 +226,8 @@ pub mod tile_world {
 
             let mut clear = true;
 
-            for x in x_min..x_max {
-                for y in y_min..y_max {
+            for y in y_min..y_max {
+                for x in x_min..x_max {
                     clear = clear && (self.sample(&GridCoord{x, y}) == TileValue::Empty);
 
                     if !clear { return clear; }
@@ -258,8 +258,8 @@ pub mod tile_world {
             let y_max = top_left.y + size.y;
 
             // Call func once for each tile within the bounds
-            for x in x_min..x_max {
-                for y in y_min..y_max {
+            for y in y_min..y_max {
+                for x in x_min..x_max {
                     let coord = GridCoord {x, y};
                     func(&coord, &self.sample(&coord));
                 }
