@@ -180,9 +180,12 @@ impl State for GameplayState {
         }
 
         let selected_tile = self. world.pos_to_grid(window.mouse().pos().x, window.mouse().pos().y);
+        let selection_area_left = selected_tile.x - 1;
+        let selection_area_top = selected_tile.y - 1;
 
-        if window.keyboard()[Key::Space].is_down() {
-            self.world.make_change(&selected_tile, &TileValue::Empty);
+        if window.keyboard()[Key::Space].is_down() 
+        && self.world.area_clear(&GridCoord{x: selection_area_left, y: selection_area_top}, &GridCoord{x: 3, y: 3}){
+            self.world.make_change(&selected_tile, &TileValue::HabModule);
         }
 
         // Dont' store the selected tile position on the world until later because reading that to make a change requires reading from it 

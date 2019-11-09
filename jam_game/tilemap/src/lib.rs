@@ -18,6 +18,8 @@ pub mod tile_world {
         Empty,
         Rock,
         Error,
+        HabModule,
+
         Subtile(GridCoord), // Subtiles have a GridCoord that points at the true position of the metatile 
         InternalUnknown // Special value for when using dense storage for values that have not yet been computed
     }
@@ -57,7 +59,12 @@ pub mod tile_world {
         // Re-generating untouched space and/or re-querying the changes data is expensive, so lets not do that every frame for every visible tile
         // Cache sizing still needs to be figured out - could be dynamic with camera size or just always big enough for max zoom
         tile_cache: LruCache<GridCoord, TileValue>,
-        caching_enabled: bool
+        caching_enabled: bool,
+        // The x/y size of tiles in grid coordinates
+        // If a tile type is not in this list, it is assumed to be 1x1
+        // When a tile of a given size is placed it will automatically set all tiles within its area to subtiles
+        // When it is removed all tiles within that area become "Empty"
+        tile_type_sizes: HashMap<TileValue, GridCoord> 
     }
 
     impl AreaChanges {
@@ -111,7 +118,6 @@ pub mod tile_world {
                     self.changes_map.insert(internal_key, tile_value.clone());
                 }
             }
-            
         }
 
         fn switch_to_dense(&mut self) {
@@ -151,13 +157,18 @@ pub mod tile_world {
     impl TileMap {
         pub fn new() -> TileMap {
             let generator_func = HybridMulti::new();
+
+            let mut tile_type_sizes: HashMap<TileValue, GridCoord> = HashMap::new();
+            tile_type_sizes.insert(TileValue::HabModule, GridCoord{x: 3, y: 3});
+
             TileMap { 
                 generator_func, 
-                rock_density: 0.5, 
+                rock_density: 0.25, 
                 selected_tile: GridCoord{ x: 0, y: 0 }, 
                 map_changes: HashMap::new(), 
                 tile_cache: LruCache::new(256),
-                caching_enabled: true
+                caching_enabled: true,
+                tile_type_sizes
             }
         }
 
@@ -207,8 +218,27 @@ pub mod tile_world {
             }
         }
 
+        pub fn area_clear(&mut self, top_left: &GridCoord, size: &GridCoord) -> bool {
+            let x_min = top_left.x;
+            let x_max = top_left.x + size.x;
+            let y_min = top_left.y;
+            let y_max = top_left.y + size.y;
 
-        pub fn for_each_tile_rect<F>(&mut self, bounds: &Rectangle, mut func: F)
+            let mut clear = true;
+
+            for x in x_min..x_max {
+                for y in y_min..y_max {
+                    clear = clear && (self.sample(&GridCoord{x, y}) == TileValue::Empty);
+
+                    if !clear { return clear; }
+                }
+            }
+
+            return clear;
+        }
+
+
+        pub fn for_each_tile_rect<F>(&mut self, bounds: &Rectangle, func: F)
             where F : FnMut(&GridCoord, &TileValue) {
             // Bounds to draw between
             let x_min = bounds.pos.x.floor() as i64;
@@ -245,6 +275,46 @@ pub mod tile_world {
         }
 
         pub fn make_change(&mut self, pos: &GridCoord, new_value: &TileValue) {
+            let old_value = self.sample(pos);
+            let old_tile_size = match self.tile_type_sizes.get(&old_value) {
+                Some(size) => *size,
+                None => GridCoord{x: 1, y: 1}
+            };
+
+            if old_tile_size.x > 1 && old_tile_size.y > 1 {
+                let x_min = pos.x - (old_tile_size.x / 2);
+                let y_min = pos.y - (old_tile_size.y / 2);
+
+                self.set_area(&GridCoord{x: x_min, y: y_min}, &old_tile_size, TileValue::Empty );
+            }
+
+            let tile_size = match self.tile_type_sizes.get(new_value) {
+                Some(size) => *size,
+                None => GridCoord{x: 1, y: 1}
+            };
+
+            let x_min = pos.x - (tile_size.x / 2);
+            let y_min = pos.y - (tile_size.y / 2);
+
+            self.set_area(&GridCoord{x: x_min, y: y_min}, &tile_size, TileValue::Subtile(*pos) );
+            self.make_single_tile_change(&pos, *new_value);
+        }
+
+        pub fn set_area(&mut self, top_left: &GridCoord, size: &GridCoord, new_value: TileValue) {
+            let x_min = top_left.x;
+            let y_min = top_left.y;
+
+            let x_max = x_min + size.x;
+            let y_max = y_min + size.y;
+
+            for y in y_min..y_max {
+                for x in x_min..x_max {
+                    self.make_single_tile_change(&GridCoord{x, y}, new_value);
+                }
+            }
+        }
+
+        fn make_single_tile_change(&mut self, pos: &GridCoord, new_value: TileValue) {
             // Unwrap values from struct
             let x = pos.x;
             let y = pos.y;
@@ -261,11 +331,11 @@ pub mod tile_world {
 
             // Safe to unwrap immediately because we know at this point the key is in the table
             let partition_changes = self.map_changes.get_mut(&partition_coord).unwrap();
-            partition_changes.add_change(pos, new_value);
+            partition_changes.add_change(pos, &new_value);
 
             // Put the new value in cache because presumably someone's going to want to know about this change
             if self.caching_enabled {
-                self.tile_cache.put(*pos, *new_value);
+                self.tile_cache.put(*pos, new_value);
             }
         }
 
@@ -286,14 +356,14 @@ mod tests {
         geom::{Rectangle},
     };
 
-    fn is_valid_tile(value: &TileValue) -> bool {
+    fn is_valid_generated_tile(value: &TileValue) -> bool {
         value == &TileValue::Empty || value == &TileValue::Rock
     }
 
     #[test]
     fn empty_map_access_gives_valid() {
         let mut map = TileMap::new();
-        assert!(is_valid_tile(&map.sample(&GridCoord{x: 0, y: 0})));
+        assert!(is_valid_generated_tile(&map.sample(&GridCoord{x: 0, y: 0})));
     }
 
     #[test]
@@ -308,7 +378,7 @@ mod tests {
 
         for x in x_min..x_max {
             for y in y_min..y_max {
-                assert!(is_valid_tile(&map.sample(&GridCoord{x, y})), "Found invalid tile at ({}, {})", x, y);
+                assert!(is_valid_generated_tile(&map.sample(&GridCoord{x, y})), "Found invalid tile at ({}, {})", x, y);
             }
         }
     }
@@ -451,5 +521,67 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn setting_large_object_works() {
+        let mut map = TileMap::new();
+
+        map.make_change(&GridCoord{x: 1, y: 1}, &TileValue::HabModule);
+
+        for x in -2..5 {
+            for y in -2..5 {
+                let value_here = map.sample(&GridCoord{x, y});
+                if x == 1 && y == 1 {
+                    assert_eq!(value_here, TileValue::HabModule);
+                }
+                else if x >= 0 && x < 3 && y >= 0 && y < 3 {
+                    assert_eq!(value_here, TileValue::Subtile(GridCoord{x: 1, y: 1}));
+                }
+                else {
+                    assert!(is_valid_generated_tile(&value_here), 
+                        "Expected untouched tile at ({}, {}), found not that",
+                        x, y
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn revoving_large_object_works() {
+        let mut map = TileMap::new();
+
+        map.make_change(&GridCoord{x: 1, y: 1}, &TileValue::HabModule);
+        map.make_change(&GridCoord{x: 1, y: 1}, &TileValue::Empty);
+
+        for x in -2..5 {
+            for y in -2..5 {
+                let value_here = map.sample(&GridCoord{x, y});
+                if x >= 0 && x < 3 && y >= 0 && y < 3 {
+                    assert_eq!(value_here, TileValue::Empty);
+                }
+                else {
+                    assert!(is_valid_generated_tile(&value_here), 
+                        "Expected untouched tile at ({}, {}), found not that",
+                        x, y
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn clear_space_is_clear() {
+        let mut map = TileMap::new();
+
+        map.set_area(&GridCoord{x: -3, y: -6}, &GridCoord{x: 9, y: 9}, TileValue::Rock);
+        map.set_area(&GridCoord{x: 0, y: 0}, &GridCoord{x: 3, y: 3}, TileValue::Empty);
+
+        assert_eq!(map.area_clear(&GridCoord{x: 0, y: 0}, &GridCoord{x: 3, y: 3}), true, "Clear area wasn't");
+        assert_eq!(map.area_clear(&GridCoord{x: -1, y: 1}, &GridCoord{x: 3, y: 3}), false, "Unclear area wasn't");
+        assert_eq!(map.area_clear(&GridCoord{x: 1, y: 1}, &GridCoord{x: 3, y: 3}), false, "Unclear area wasn't");
+        assert_eq!(map.area_clear(&GridCoord{x: 1, y: -1}, &GridCoord{x: 3, y: 3}), false, "Unclear area wasn't");
+        assert_eq!(map.area_clear(&GridCoord{x: -1, y: 1}, &GridCoord{x: 3, y: 3}), false, "Unclear area wasn't");
     }
 }
