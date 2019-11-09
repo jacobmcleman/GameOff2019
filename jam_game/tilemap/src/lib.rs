@@ -18,6 +18,7 @@ pub mod tile_world {
         Empty,
         Rock,
         Error,
+        Subtile(GridCoord), // Subtiles have a GridCoord that points at the true position of the metatile 
         InternalUnknown // Special value for when using dense storage for values that have not yet been computed
     }
 
@@ -235,8 +236,12 @@ pub mod tile_world {
             }
         }
 
-        pub fn pos_to_grid(&self, world_x: f32 , world_y: f32) -> GridCoord {
-            GridCoord { x: world_x as i64, y: world_y as i64}
+        pub fn pos_to_grid(&mut self, world_x: f32 , world_y: f32) -> GridCoord {
+            let pos = GridCoord { x: world_x as i64, y: world_y as i64};
+            match self.sample(&pos) {
+                TileValue::Subtile(ref_position) => ref_position,
+                _ => pos
+            }
         }
 
         pub fn make_change(&mut self, pos: &GridCoord, new_value: &TileValue) {
@@ -386,12 +391,19 @@ mod tests {
 
     #[test]
     fn pos_to_grid() {
-        let map = TileMap::new();
+        let mut map = TileMap::new();
         assert_eq!(map.pos_to_grid(0.0, 0.0), GridCoord{x: 0, y: 0});
         assert_eq!(map.pos_to_grid(0.1, 0.1), GridCoord{x: 0, y: 0});
         assert_eq!(map.pos_to_grid(-0.1, -0.1), GridCoord{x: 0, y: 0});
         assert_eq!(map.pos_to_grid(0.6, -0.6), GridCoord{x: 0, y: 0});
         assert_eq!(map.pos_to_grid(1.0, 1.0), GridCoord{x: 1, y: 1});
+    }
+
+    #[test]
+    fn pos_to_grid_subtiles() {
+        let mut map = TileMap::new();
+        map.make_change(&GridCoord{x: 0, y: 0}, &TileValue::Subtile(GridCoord{x: 1, y: 0}));
+        assert_eq!(map.pos_to_grid(0.0, 0.0), GridCoord{x: 1, y: 0});
     }
 
     #[test]
