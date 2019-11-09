@@ -22,11 +22,7 @@ matrix:
     - rust: stable
       env: WASM=0
       script:
-        - cd ./jam_game 
-        - cargo check --examples --no-default-features
-        - cd ./ tilemap
-        - cargo check --examples --no-default-features
-        - cargo test
+        - cd ./jam_game && cargo check --examples --no-default-features && cd ./ tilemap && cargo check --examples --no-default-features && cargo test
   allow_failures:
     - rust: nightly
   fast_finish: true
