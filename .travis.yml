@@ -1,8 +1,4 @@
 language: rust
-os:
-  - linux
-  - osx
-  - windows
 addons:
   apt:
     packages:
@@ -12,17 +8,15 @@ addons:
 env:
   global:
     - RUST_BACKTRACE=1
-  matrix:
-    - WASM=0
-rust:
-  - stable
-  - nightly
 matrix:
   include:
     - rust: stable
       env: WASM=0
-      script:
-        - cd ./jam_game && cargo check --examples --no-default-features && cd ./ tilemap && cargo check --examples --no-default-features && cargo test
+      script: cd ./jam_game && cargo check --examples --no-default-features
+  include:
+    - rust: stable
+      env: WASM=0
+      script: cd ./jam_game/tilemap && cargo check --examples --no-default-features && cargo test
   allow_failures:
     - rust: nightly
   fast_finish: true
