@@ -13,16 +13,16 @@ jobs:
     - rust: stable
       os: linux
       env: WASM=0
-      script: cd ./jam_game && cargo check --examples --no-default-features
+      script: cd ./jam_game && cargo build
     - rust: stable
       os: linux
       env: WASM=0
-      script: cd ./jam_game/tilemap && cargo check --examples --no-default-features && cargo test
+      script: cd ./jam_game/tilemap && cargo test
     - rust: beta
       os: linux
       env: WASM=0
-      script: cd ./jam_game && cargo check --examples --no-default-features
+      script: cd ./jam_game && cargo build
     - rust: beta
       os: linux
       env: WASM=0
-      script: cd ./jam_game/tilemap && cargo check --examples --no-default-features && cargo test
+      script: cd ./jam_game/tilemap && cargo test
