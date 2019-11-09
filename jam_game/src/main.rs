@@ -84,8 +84,6 @@ impl State for GameplayState {
     fn draw(&mut self, window: &mut Window) -> Result<()> {
         window.clear(Color::BLACK)?;
 
-        this is clearly non-working code
-
         //Prepare the camera
         // Calculate the aspect ratio of the display
         let screen_size = window.screen_size();
