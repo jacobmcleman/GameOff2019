@@ -52,10 +52,11 @@ pub mod tile_world {
         //      - Could also use this partitioning to not load whole save files on start up, load more lazily
         //      - Alternatively, could ignore the partitioning for the save files to make it easier to tweak things like sizes and internal behavior later (don't save 2d arrays just a bunch o changes)
         map_changes: HashMap<GridCoord, AreaChanges>,
+        // TODO: figure out a way of re-enabling caching behavior without making everything be mutable
         // Re-generating untouched space and/or re-querying the changes data is expensive, so lets not do that every frame for every visible tile
         // Cache sizing still needs to be figured out - could be dynamic with camera size or just always big enough for max zoom
-        tile_cache: LruCache<GridCoord, TileValue>,
-        caching_enabled: bool,
+        // tile_cache: LruCache<GridCoord, TileValue>,
+        // caching_enabled: bool,
         // The x/y size of tiles in grid coordinates
         // If a tile type is not in this list, it is assumed to be 1x1
         // When a tile of a given size is placed it will automatically set all tiles within its area to subtiles
@@ -161,56 +162,44 @@ pub mod tile_world {
                 generator_func, 
                 rock_density: 0.25, 
                 map_changes: HashMap::new(), 
-                tile_cache: LruCache::new(256),
-                caching_enabled: true,
+                // tile_cache: LruCache::new(256),
+                // caching_enabled: true,
                 tile_type_sizes
             }
         }
 
-        pub fn sample(&mut self, pos: &GridCoord) -> TileValue {
+        pub fn sample(&self, pos: &GridCoord) -> TileValue {
             // Unwrap values from struct
             let x = pos.x;
             let y = pos.y;
 
-            // Check cache (if enabled) before doing all the work of looking up the stored data
-            let cache_result: Option<&TileValue> = if self.caching_enabled { self.tile_cache.get(pos) } else { None };
+            // Mask away the bits 
+            let partition_x = x & !(PARTITION_SIZE as i64 - 1);
+            let partition_y = y & !(PARTITION_SIZE as i64 - 1);
+            let partition_coord = GridCoord { x: partition_x, y: partition_y };
 
-            if cache_result.is_some() {
-                return cache_result.unwrap().clone();
-            }
-            else {
-                // Mask away the bits 
-                let partition_x = x & !(PARTITION_SIZE as i64 - 1);
-                let partition_y = y & !(PARTITION_SIZE as i64 - 1);
-                let partition_coord = GridCoord { x: partition_x, y: partition_y };
-
-                // Check the history for a matching change
-                // First see if there is any changes within this tiles partition
-                if self.map_changes.contains_key(&partition_coord)  {
-                    // Ask the partition if there is a value for this tile
-                    let tile_value: Option<TileValue> = self.map_changes.get(&partition_coord).unwrap().sample(pos);
-                    if tile_value.is_some() {
-                        // There is a changed value in this tile, use that
-                        return tile_value.unwrap();
-                    }
+            // Check the history for a matching change
+            // First see if there is any changes within this tiles partition
+            if self.map_changes.contains_key(&partition_coord)  {
+                // Ask the partition if there is a value for this tile
+                let tile_value: Option<TileValue> = self.map_changes.get(&partition_coord).unwrap().sample(pos);
+                if tile_value.is_some() {
+                    // There is a changed value in this tile, use that
+                    return tile_value.unwrap();
                 }
-
-                // If no edits have been applied to this tile, sample the noise function to decide what goes here
-                // Noise is from -1..1 but I only want 0..1 so shift it first
-                let value = ((self.generator_func.get([x as f64, y as f64]) + 1.0) / (2.0 + self.rock_density)).round();
-                let value = if value > 1.0 { 1.0 } else if value < 0.0 { 0.0 } else { value };
-                let tile_val = match value as i32 {
-                    0 => TileValue::Empty,
-                    1 => TileValue::Rock,
-                    _ => TileValue::Error
-                };
-
-                if self.caching_enabled {
-                    self.tile_cache.put(*pos, tile_val);
-                }
-
-                return tile_val;
             }
+
+            // If no edits have been applied to this tile, sample the noise function to decide what goes here
+            // Noise is from -1..1 but I only want 0..1 so shift it first
+            let value = ((self.generator_func.get([x as f64, y as f64]) + 1.0) / (2.0 + self.rock_density)).round();
+            let value = if value > 1.0 { 1.0 } else if value < 0.0 { 0.0 } else { value };
+            let tile_val = match value as i32 {
+                0 => TileValue::Empty,
+                1 => TileValue::Rock,
+                _ => TileValue::Error
+            };
+
+            return tile_val;
         }
 
         pub fn area_clear(&mut self, top_left: &GridCoord, size: &GridCoord) -> bool {
@@ -233,18 +222,18 @@ pub mod tile_world {
         }
 
 
-        pub fn for_each_tile_rect<F>(&mut self, bounds: &Rectangle, func: F)
+        pub fn for_each_tile_rect<F>(&self, bounds: &Rectangle, func: F)
             where F : FnMut(&GridCoord, &TileValue, &GridCoord) {
             // Bounds to draw between
             let x_min = bounds.pos.x.floor() as i64;
-            let x_size = bounds.size.x.ceil() as i64;
+            let x_size = bounds.size.x.ceil() as i64 + 1;
             let y_min = bounds.pos.y.floor() as i64;
-            let y_size =bounds.size.y.ceil() as i64;
+            let y_size = bounds.size.y.ceil() as i64 + 1;
             
             self.for_each_tile(&GridCoord{x: x_min, y: y_min}, &GridCoord{x: x_size, y: y_size}, func)
         }
 
-        pub fn for_each_tile<F>(&mut self, top_left: &GridCoord, size: &GridCoord, mut func: F)
+        pub fn for_each_tile<F>(&self, top_left: &GridCoord, size: &GridCoord, mut func: F)
             where F : FnMut(&GridCoord, &TileValue, &GridCoord) {
             // Bounds to draw between
             let x_min = top_left.x;
@@ -323,16 +312,6 @@ pub mod tile_world {
             // Safe to unwrap immediately because we know at this point the key is in the table
             let partition_changes = self.map_changes.get_mut(&partition_coord).unwrap();
             partition_changes.add_change(pos, &new_value);
-
-            // Put the new value in cache because presumably someone's going to want to know about this change
-            if self.caching_enabled {
-                self.tile_cache.put(*pos, new_value);
-            }
-        }
-
-        // If new size is smaller, elements will be dropped
-        pub fn resize_cache(&mut self, new_size: usize) {
-            self.tile_cache.resize(new_size);
         }
 
         pub fn get_tile_size(&self, tile_type: &TileValue) -> GridCoord {
