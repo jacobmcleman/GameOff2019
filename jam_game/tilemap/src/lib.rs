@@ -5,7 +5,6 @@ pub mod tile_world {
     use noise::{NoiseFn, HybridMulti};
     use std::collections::HashMap;
     use quicksilver::geom::Rectangle;
-    use lru::LruCache;
 
     #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
     pub struct GridCoord {
@@ -134,7 +133,7 @@ pub mod tile_world {
             self.using_dense_storage = true;
         }
 
-        fn switch_to_sparse(&mut self) {
+        fn _switch_to_sparse(&mut self) {
             if !self.using_dense_storage { return; }
 
             for x in 0..PARTITION_SIZE {
@@ -326,7 +325,7 @@ pub mod tile_world {
 #[cfg(test)]
 mod tests {
     use crate::tile_world::{
-        TileMap, TileValue, GridCoord, AreaChanges, PARTITION_SIZE, DENSE_SWITCH_POINT
+        TileMap, TileValue, GridCoord, AreaChanges, PARTITION_SIZE
     };
 
     use quicksilver::{
@@ -339,13 +338,13 @@ mod tests {
 
     #[test]
     fn empty_map_access_gives_valid() {
-        let mut map = TileMap::new();
+        let map = TileMap::new();
         assert!(is_valid_generated_tile(&map.sample(&GridCoord{x: 0, y: 0})));
     }
 
     #[test]
     fn untouched_map_no_errors() {
-        let mut map = TileMap::new();
+        let map = TileMap::new();
         
         // Check the 1 million tiles closest to origin
         let x_min: i64 = -500;
@@ -455,7 +454,7 @@ mod tests {
 
     #[test]
     fn for_each_tile_bounds_gets_all() {
-        let mut map = TileMap::new();
+        let map = TileMap::new();
         // Create a rectangle from (0, 0) to (10, 10)
         let bounds = Rectangle::new_sized((10, 10));
         let mut tiles_hit: u32 = 0;
@@ -471,7 +470,8 @@ mod tests {
             assert!(pos.y <= max_val, "Expected Y less than {}, got {}", max_val, pos.y);
         });
 
-        assert_eq!(tiles_hit, 100);
+        // One row past the end should be hit, so actual bounds are 11x11
+        assert_eq!(tiles_hit, 121);
     }
 
     #[test]
