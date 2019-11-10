@@ -3,14 +3,20 @@ extern crate lru;
 
 pub mod tile_world {
     use noise::{NoiseFn, HybridMulti};
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
     use quicksilver::geom::Rectangle;
-    use lru::LruCache;
 
     #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
     pub struct GridCoord {
         pub x: i64,
         pub y: i64
+    }
+
+    impl GridCoord {
+        fn is_within_bounds(top_left: &GridCoord, size: &GridCoord, pos: &GridCoord) -> bool {
+            pos.x >= top_left.x && pos.x < (top_left.x + size.x) && 
+            pos.y >= top_left.y && pos.y < (top_left.y + size.y)
+        }
     }
 
     #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -52,10 +58,11 @@ pub mod tile_world {
         //      - Could also use this partitioning to not load whole save files on start up, load more lazily
         //      - Alternatively, could ignore the partitioning for the save files to make it easier to tweak things like sizes and internal behavior later (don't save 2d arrays just a bunch o changes)
         map_changes: HashMap<GridCoord, AreaChanges>,
+        // TODO: figure out a way of re-enabling caching behavior without making everything be mutable
         // Re-generating untouched space and/or re-querying the changes data is expensive, so lets not do that every frame for every visible tile
         // Cache sizing still needs to be figured out - could be dynamic with camera size or just always big enough for max zoom
-        tile_cache: LruCache<GridCoord, TileValue>,
-        caching_enabled: bool,
+        // tile_cache: LruCache<GridCoord, TileValue>,
+        // caching_enabled: bool,
         // The x/y size of tiles in grid coordinates
         // If a tile type is not in this list, it is assumed to be 1x1
         // When a tile of a given size is placed it will automatically set all tiles within its area to subtiles
@@ -133,7 +140,7 @@ pub mod tile_world {
             self.using_dense_storage = true;
         }
 
-        fn switch_to_sparse(&mut self) {
+        fn _switch_to_sparse(&mut self) {
             if !self.using_dense_storage { return; }
 
             for x in 0..PARTITION_SIZE {
@@ -161,56 +168,44 @@ pub mod tile_world {
                 generator_func, 
                 rock_density: 0.25, 
                 map_changes: HashMap::new(), 
-                tile_cache: LruCache::new(256),
-                caching_enabled: true,
+                // tile_cache: LruCache::new(256),
+                // caching_enabled: true,
                 tile_type_sizes
             }
         }
 
-        pub fn sample(&mut self, pos: &GridCoord) -> TileValue {
+        pub fn sample(&self, pos: &GridCoord) -> TileValue {
             // Unwrap values from struct
             let x = pos.x;
             let y = pos.y;
 
-            // Check cache (if enabled) before doing all the work of looking up the stored data
-            let cache_result: Option<&TileValue> = if self.caching_enabled { self.tile_cache.get(pos) } else { None };
+            // Mask away the bits 
+            let partition_x = x & !(PARTITION_SIZE as i64 - 1);
+            let partition_y = y & !(PARTITION_SIZE as i64 - 1);
+            let partition_coord = GridCoord { x: partition_x, y: partition_y };
 
-            if cache_result.is_some() {
-                return cache_result.unwrap().clone();
-            }
-            else {
-                // Mask away the bits 
-                let partition_x = x & !(PARTITION_SIZE as i64 - 1);
-                let partition_y = y & !(PARTITION_SIZE as i64 - 1);
-                let partition_coord = GridCoord { x: partition_x, y: partition_y };
-
-                // Check the history for a matching change
-                // First see if there is any changes within this tiles partition
-                if self.map_changes.contains_key(&partition_coord)  {
-                    // Ask the partition if there is a value for this tile
-                    let tile_value: Option<TileValue> = self.map_changes.get(&partition_coord).unwrap().sample(pos);
-                    if tile_value.is_some() {
-                        // There is a changed value in this tile, use that
-                        return tile_value.unwrap();
-                    }
+            // Check the history for a matching change
+            // First see if there is any changes within this tiles partition
+            if self.map_changes.contains_key(&partition_coord)  {
+                // Ask the partition if there is a value for this tile
+                let tile_value: Option<TileValue> = self.map_changes.get(&partition_coord).unwrap().sample(pos);
+                if tile_value.is_some() {
+                    // There is a changed value in this tile, use that
+                    return tile_value.unwrap();
                 }
-
-                // If no edits have been applied to this tile, sample the noise function to decide what goes here
-                // Noise is from -1..1 but I only want 0..1 so shift it first
-                let value = ((self.generator_func.get([x as f64, y as f64]) + 1.0) / (2.0 + self.rock_density)).round();
-                let value = if value > 1.0 { 1.0 } else if value < 0.0 { 0.0 } else { value };
-                let tile_val = match value as i32 {
-                    0 => TileValue::Empty,
-                    1 => TileValue::Rock,
-                    _ => TileValue::Error
-                };
-
-                if self.caching_enabled {
-                    self.tile_cache.put(*pos, tile_val);
-                }
-
-                return tile_val;
             }
+
+            // If no edits have been applied to this tile, sample the noise function to decide what goes here
+            // Noise is from -1..1 but I only want 0..1 so shift it first
+            let value = ((self.generator_func.get([x as f64, y as f64]) + 1.0) / (2.0 + self.rock_density)).round();
+            let value = if value > 1.0 { 1.0 } else if value < 0.0 { 0.0 } else { value };
+            let tile_val = match value as i32 {
+                0 => TileValue::Empty,
+                1 => TileValue::Rock,
+                _ => TileValue::Error
+            };
+
+            return tile_val;
         }
 
         pub fn area_clear(&mut self, top_left: &GridCoord, size: &GridCoord) -> bool {
@@ -233,18 +228,18 @@ pub mod tile_world {
         }
 
 
-        pub fn for_each_tile_rect<F>(&mut self, bounds: &Rectangle, func: F)
+        pub fn for_each_tile_rect<F>(&self, bounds: &Rectangle, func: F)
             where F : FnMut(&GridCoord, &TileValue, &GridCoord) {
             // Bounds to draw between
             let x_min = bounds.pos.x.floor() as i64;
-            let x_size = bounds.size.x.ceil() as i64;
+            let x_size = bounds.size.x.ceil() as i64 + 1;
             let y_min = bounds.pos.y.floor() as i64;
-            let y_size =bounds.size.y.ceil() as i64;
+            let y_size = bounds.size.y.ceil() as i64 + 1;
             
             self.for_each_tile(&GridCoord{x: x_min, y: y_min}, &GridCoord{x: x_size, y: y_size}, func)
         }
 
-        pub fn for_each_tile<F>(&mut self, top_left: &GridCoord, size: &GridCoord, mut func: F)
+        pub fn for_each_tile<F>(&self, top_left: &GridCoord, size: &GridCoord, mut func: F)
             where F : FnMut(&GridCoord, &TileValue, &GridCoord) {
             // Bounds to draw between
             let x_min = top_left.x;
@@ -252,13 +247,30 @@ pub mod tile_world {
             let y_min = top_left.y;
             let y_max = top_left.y + size.y;
 
+            // Set of tiles that have already been hit by subtile references (to avoid double hits)
+            let mut refed_tiles: HashSet<GridCoord> = HashSet::new();
+
             // Call func once for each tile within the bounds
             for y in y_min..y_max {
                 for x in x_min..x_max {
                     let coord = GridCoord {x, y};
                     let tile_value = self.sample(&coord);
-                    let size = self.get_tile_size(&tile_value);
-                    func(&coord, &tile_value, &size);
+                    match tile_value {
+                        TileValue::Subtile(refto) => {
+                            if !GridCoord::is_within_bounds(top_left, size, &refto) && !refed_tiles.contains(&refto) {
+                                refed_tiles.insert(refto);
+                                let ref_value = self.sample(&refto);
+                                let ref_size = self.get_tile_size(&ref_value);
+                                func(&refto, &ref_value, &ref_size);
+                            }
+                        }
+                        _ => {
+                            let size = self.get_tile_size(&tile_value);
+                            func(&coord, &tile_value, &size);
+                        }
+                    }
+
+                    
                 }
             }
         }
@@ -323,16 +335,6 @@ pub mod tile_world {
             // Safe to unwrap immediately because we know at this point the key is in the table
             let partition_changes = self.map_changes.get_mut(&partition_coord).unwrap();
             partition_changes.add_change(pos, &new_value);
-
-            // Put the new value in cache because presumably someone's going to want to know about this change
-            if self.caching_enabled {
-                self.tile_cache.put(*pos, new_value);
-            }
-        }
-
-        // If new size is smaller, elements will be dropped
-        pub fn resize_cache(&mut self, new_size: usize) {
-            self.tile_cache.resize(new_size);
         }
 
         pub fn get_tile_size(&self, tile_type: &TileValue) -> GridCoord {
@@ -347,7 +349,7 @@ pub mod tile_world {
 #[cfg(test)]
 mod tests {
     use crate::tile_world::{
-        TileMap, TileValue, GridCoord, AreaChanges, PARTITION_SIZE, DENSE_SWITCH_POINT
+        TileMap, TileValue, GridCoord, AreaChanges, PARTITION_SIZE
     };
 
     use quicksilver::{
@@ -360,13 +362,13 @@ mod tests {
 
     #[test]
     fn empty_map_access_gives_valid() {
-        let mut map = TileMap::new();
+        let map = TileMap::new();
         assert!(is_valid_generated_tile(&map.sample(&GridCoord{x: 0, y: 0})));
     }
 
     #[test]
     fn untouched_map_no_errors() {
-        let mut map = TileMap::new();
+        let map = TileMap::new();
         
         // Check the 1 million tiles closest to origin
         let x_min: i64 = -500;
@@ -476,7 +478,7 @@ mod tests {
 
     #[test]
     fn for_each_tile_bounds_gets_all() {
-        let mut map = TileMap::new();
+        let map = TileMap::new();
         // Create a rectangle from (0, 0) to (10, 10)
         let bounds = Rectangle::new_sized((10, 10));
         let mut tiles_hit: u32 = 0;
@@ -492,7 +494,8 @@ mod tests {
             assert!(pos.y <= max_val, "Expected Y less than {}, got {}", max_val, pos.y);
         });
 
-        assert_eq!(tiles_hit, 100);
+        // One row past the end should be hit, so actual bounds are 11x11
+        assert_eq!(tiles_hit, 121);
     }
 
     #[test]
@@ -567,6 +570,107 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn for_each_tile_bounds_gets_right_edge_of_screen_building() {
+        let mut map = TileMap::new();
+        map.make_change(&GridCoord{x: 5, y: 0}, &TileValue::HabModule);
+        let bounds = Rectangle::new_sized((4, 4));
+        let mut hab_hit = 0;
+        map.for_each_tile_rect(&bounds, |pos: &GridCoord, value: &TileValue, _size: &GridCoord| {
+            if *value == TileValue::HabModule {
+                assert_eq!(*pos, GridCoord{x: 5, y: 0}, "Found building in wrong place");
+                hab_hit += 1;
+            }
+        });
+        assert!(hab_hit > 0, "Failed to find building on edge of screen");
+        assert!(hab_hit == 1, "Found building too many times");
+    }
+    #[test]
+    fn for_each_tile_bounds_gets_left_edge_of_screen_building() {
+        let mut map = TileMap::new();
+        map.make_change(&GridCoord{x: -1, y: 0}, &TileValue::HabModule);
+        let bounds = Rectangle::new_sized((4, 4));
+        let mut hab_hit = 0;
+        map.for_each_tile_rect(&bounds, |pos: &GridCoord, value: &TileValue, _size: &GridCoord| {
+            if *value == TileValue::HabModule {
+                assert_eq!(*pos, GridCoord{x: -1, y: 0}, "Found building in wrong place");
+                hab_hit += 1;
+            }
+        });
+        assert!(hab_hit > 0, "Failed to find building on edge of screen");
+        assert!(hab_hit == 1, "Found building too many times");
+    }
+    #[test]
+    fn for_each_tile_bounds_gets_top_edge_of_screen_building() {
+        let mut map = TileMap::new();
+        map.make_change(&GridCoord{x: 0, y: 5}, &TileValue::HabModule);
+        let bounds = Rectangle::new_sized((4, 4));
+        let mut hab_hit = 0;
+        map.for_each_tile_rect(&bounds, |pos: &GridCoord, value: &TileValue, _size: &GridCoord| {
+            if *value == TileValue::HabModule {
+                assert_eq!(*pos, GridCoord{x: 0, y: 5}, "Found building in wrong place");
+                hab_hit += 1;
+            }
+        });
+        assert!(hab_hit > 0, "Failed to find building on edge of screen");
+        assert!(hab_hit == 1, "Found building too many times");
+    }
+    #[test]
+    fn for_each_tile_bounds_gets_bottom_edge_of_screen_building() {
+        let mut map = TileMap::new();
+        map.make_change(&GridCoord{x: 0, y: -1}, &TileValue::HabModule);
+        let bounds = Rectangle::new_sized((4, 4));
+        let mut hab_hit = 0;
+        map.for_each_tile_rect(&bounds, |pos: &GridCoord, value: &TileValue, _size: &GridCoord| {
+            if *value == TileValue::HabModule {
+                assert_eq!(*pos, GridCoord{x: 0, y: -1}, "Found building in wrong place");
+                hab_hit += 1;
+            }
+        });
+        assert!(hab_hit > 0, "Failed to find building on edge of screen");
+        assert!(hab_hit == 1, "Found building too many times");
+    }
+
+    #[test]
+    fn for_each_tile_bounds_gets_pos_corner_of_screen_building() {
+        let mut map = TileMap::new();
+
+        map.make_change(&GridCoord{x: 5, y: 5}, &TileValue::HabModule);
+        let bounds = Rectangle::new_sized((4, 4));
+
+        let mut hab_hit = 0;
+
+        map.for_each_tile_rect(&bounds, |pos: &GridCoord, value: &TileValue, _size: &GridCoord| {
+            if *value == TileValue::HabModule {
+                assert_eq!(*pos, GridCoord{x: 5, y: 5}, "Found building in wrong place");
+                hab_hit += 1;
+            }
+        });
+
+        assert!(hab_hit > 0, "Failed to find building on edge of screen");
+        assert!(hab_hit == 1, "Found building too many times");
+    }
+
+    #[test]
+    fn for_each_tile_bounds_gets_neg_corner_of_screen_building() {
+        let mut map = TileMap::new();
+
+        map.make_change(&GridCoord{x: -1, y: -1}, &TileValue::HabModule);
+        let bounds = Rectangle::new_sized((4, 4));
+
+        let mut hab_hit = 0;
+
+        map.for_each_tile_rect(&bounds, |pos: &GridCoord, value: &TileValue, _size: &GridCoord| {
+            if *value == TileValue::HabModule {
+                assert_eq!(*pos, GridCoord{x: -1, y: -1}, "Found building in wrong place");
+                hab_hit += 1;
+            }
+        });
+
+        assert!(hab_hit > 0, "Failed to find building on edge of screen");
+        assert!(hab_hit == 1, "Found building too many times");
     }
 
     #[test]
