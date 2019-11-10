@@ -53,6 +53,9 @@ struct GameplayState {
     camera_id: EntityId,
     tile_textures: HashMap<TileValue, Image>,
     tile_cursor: Asset<Image>,
+    empty_asset: Asset<Image>,
+    hab_asset: Asset<Image>,
+    rock_asset: Asset<Image>,
     selected_tile: GridCoord,
     can_place: bool
 }
@@ -94,9 +97,7 @@ impl State for GameplayState {
         let mut hab_asset = Asset::new(Image::load("tile_textures/hab.png"));
         let mut rock_asset = Asset::new(Image::load("tile_textures/rock.png"));
 
-        empty_asset.execute(|image| { tile_textures.insert(TileValue::Empty, image.clone()); Ok(()) })?;
-        rock_asset.execute(|image| { tile_textures.insert(TileValue::Rock, image.clone()); Ok(()) })?;
-        hab_asset.execute(|image| { tile_textures.insert(TileValue::HabModule, image.clone()); Ok(()) })?;
+        
 
         Ok( GameplayState{ 
             system, world: 
@@ -104,6 +105,9 @@ impl State for GameplayState {
             camera_id: camera_ent, 
             tile_textures, 
             tile_cursor: Asset::new(Image::load("selection.png")),
+            empty_asset,
+            hab_asset,
+            rock_asset,
             selected_tile: GridCoord{x: 0, y: 0},
             can_place: false
         } )
@@ -112,6 +116,23 @@ impl State for GameplayState {
       
 
     fn draw(&mut self, window: &mut Window) -> Result<()> {
+        // Load images we don't have yet if they're ready
+        let mut newly_loaded_assets: HashMap<TileValue, Image> = HashMap::new();
+        if !self.tile_textures.contains_key(&TileValue::Empty) {
+            self.empty_asset.execute(|image| { newly_loaded_assets.insert(TileValue::Empty, image.clone()); Ok(()) })?;
+        }
+        if !self.tile_textures.contains_key(&TileValue::Rock) {
+            self.rock_asset.execute(|image| { newly_loaded_assets.insert(TileValue::Rock, image.clone()); Ok(()) })?;
+        }
+        if !self.tile_textures.contains_key(&TileValue::HabModule) {
+            self.hab_asset.execute(|image| { newly_loaded_assets.insert(TileValue::HabModule, image.clone()); Ok(()) })?;
+        }
+        if !newly_loaded_assets.is_empty() {
+            for (key, val) in newly_loaded_assets.iter() {
+                self.tile_textures.insert(*key, val.clone());
+            }
+        }
+
         window.clear(Color::BLACK)?;
 
         //Prepare the camera
