@@ -3,13 +3,20 @@ extern crate lru;
 
 pub mod tile_world {
     use noise::{NoiseFn, HybridMulti};
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
     use quicksilver::geom::Rectangle;
 
     #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
     pub struct GridCoord {
         pub x: i64,
         pub y: i64
+    }
+
+    impl GridCoord {
+        fn is_within_bounds(top_left: &GridCoord, size: &GridCoord, pos: &GridCoord) -> bool {
+            pos.x >= top_left.x && pos.x < (top_left.x + size.x) && 
+            pos.y >= top_left.y && pos.y < (top_left.y + size.y)
+        }
     }
 
     #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -240,13 +247,30 @@ pub mod tile_world {
             let y_min = top_left.y;
             let y_max = top_left.y + size.y;
 
+            // Set of tiles that have already been hit by subtile references (to avoid double hits)
+            let mut refed_tiles: HashSet<GridCoord> = HashSet::new();
+
             // Call func once for each tile within the bounds
             for y in y_min..y_max {
                 for x in x_min..x_max {
                     let coord = GridCoord {x, y};
                     let tile_value = self.sample(&coord);
-                    let size = self.get_tile_size(&tile_value);
-                    func(&coord, &tile_value, &size);
+                    match tile_value {
+                        TileValue::Subtile(refto) => {
+                            if !GridCoord::is_within_bounds(top_left, size, &refto) && !refed_tiles.contains(&refto) {
+                                refed_tiles.insert(refto);
+                                let ref_value = self.sample(&refto);
+                                let ref_size = self.get_tile_size(&ref_value);
+                                func(&refto, &ref_value, &ref_size);
+                            }
+                        }
+                        _ => {
+                            let size = self.get_tile_size(&tile_value);
+                            func(&coord, &tile_value, &size);
+                        }
+                    }
+
+                    
                 }
             }
         }
@@ -546,6 +570,107 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn for_each_tile_bounds_gets_right_edge_of_screen_building() {
+        let mut map = TileMap::new();
+        map.make_change(&GridCoord{x: 5, y: 0}, &TileValue::HabModule);
+        let bounds = Rectangle::new_sized((4, 4));
+        let mut hab_hit = 0;
+        map.for_each_tile_rect(&bounds, |pos: &GridCoord, value: &TileValue, _size: &GridCoord| {
+            if *value == TileValue::HabModule {
+                assert_eq!(*pos, GridCoord{x: 5, y: 0}, "Found building in wrong place");
+                hab_hit += 1;
+            }
+        });
+        assert!(hab_hit > 0, "Failed to find building on edge of screen");
+        assert!(hab_hit == 1, "Found building too many times");
+    }
+    #[test]
+    fn for_each_tile_bounds_gets_left_edge_of_screen_building() {
+        let mut map = TileMap::new();
+        map.make_change(&GridCoord{x: -1, y: 0}, &TileValue::HabModule);
+        let bounds = Rectangle::new_sized((4, 4));
+        let mut hab_hit = 0;
+        map.for_each_tile_rect(&bounds, |pos: &GridCoord, value: &TileValue, _size: &GridCoord| {
+            if *value == TileValue::HabModule {
+                assert_eq!(*pos, GridCoord{x: -1, y: 0}, "Found building in wrong place");
+                hab_hit += 1;
+            }
+        });
+        assert!(hab_hit > 0, "Failed to find building on edge of screen");
+        assert!(hab_hit == 1, "Found building too many times");
+    }
+    #[test]
+    fn for_each_tile_bounds_gets_top_edge_of_screen_building() {
+        let mut map = TileMap::new();
+        map.make_change(&GridCoord{x: 0, y: 5}, &TileValue::HabModule);
+        let bounds = Rectangle::new_sized((4, 4));
+        let mut hab_hit = 0;
+        map.for_each_tile_rect(&bounds, |pos: &GridCoord, value: &TileValue, _size: &GridCoord| {
+            if *value == TileValue::HabModule {
+                assert_eq!(*pos, GridCoord{x: 0, y: 5}, "Found building in wrong place");
+                hab_hit += 1;
+            }
+        });
+        assert!(hab_hit > 0, "Failed to find building on edge of screen");
+        assert!(hab_hit == 1, "Found building too many times");
+    }
+    #[test]
+    fn for_each_tile_bounds_gets_bottom_edge_of_screen_building() {
+        let mut map = TileMap::new();
+        map.make_change(&GridCoord{x: 0, y: -1}, &TileValue::HabModule);
+        let bounds = Rectangle::new_sized((4, 4));
+        let mut hab_hit = 0;
+        map.for_each_tile_rect(&bounds, |pos: &GridCoord, value: &TileValue, _size: &GridCoord| {
+            if *value == TileValue::HabModule {
+                assert_eq!(*pos, GridCoord{x: 0, y: -1}, "Found building in wrong place");
+                hab_hit += 1;
+            }
+        });
+        assert!(hab_hit > 0, "Failed to find building on edge of screen");
+        assert!(hab_hit == 1, "Found building too many times");
+    }
+
+    #[test]
+    fn for_each_tile_bounds_gets_pos_corner_of_screen_building() {
+        let mut map = TileMap::new();
+
+        map.make_change(&GridCoord{x: 5, y: 5}, &TileValue::HabModule);
+        let bounds = Rectangle::new_sized((4, 4));
+
+        let mut hab_hit = 0;
+
+        map.for_each_tile_rect(&bounds, |pos: &GridCoord, value: &TileValue, _size: &GridCoord| {
+            if *value == TileValue::HabModule {
+                assert_eq!(*pos, GridCoord{x: 5, y: 5}, "Found building in wrong place");
+                hab_hit += 1;
+            }
+        });
+
+        assert!(hab_hit > 0, "Failed to find building on edge of screen");
+        assert!(hab_hit == 1, "Found building too many times");
+    }
+
+    #[test]
+    fn for_each_tile_bounds_gets_neg_corner_of_screen_building() {
+        let mut map = TileMap::new();
+
+        map.make_change(&GridCoord{x: -1, y: -1}, &TileValue::HabModule);
+        let bounds = Rectangle::new_sized((4, 4));
+
+        let mut hab_hit = 0;
+
+        map.for_each_tile_rect(&bounds, |pos: &GridCoord, value: &TileValue, _size: &GridCoord| {
+            if *value == TileValue::HabModule {
+                assert_eq!(*pos, GridCoord{x: -1, y: -1}, "Found building in wrong place");
+                hab_hit += 1;
+            }
+        });
+
+        assert!(hab_hit > 0, "Failed to find building on edge of screen");
+        assert!(hab_hit == 1, "Found building too many times");
     }
 
     #[test]
