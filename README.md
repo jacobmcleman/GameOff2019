@@ -1,4 +1,5 @@
-# GameOff2019
+# GameOff2019 
+[![Build Status](https://travis-ci.org/jacobmcleman/GameOff2019.svg?branch=master)](https://travis-ci.org/jacobmcleman/GameOff2019)
 Setup instructions:
 1. Follow the links/instructions here https://www.rust-lang.org/learn/get-started to install the rust toolchain
 2. If you want to build the web version, install cargo-web with `cargo install cargo-web` (full instructions here https://github.com/koute/cargo-web)
