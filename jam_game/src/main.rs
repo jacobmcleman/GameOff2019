@@ -52,7 +52,7 @@ struct GameplayState {
     world: TileMap,
     camera_id: EntityId,
     tile_textures: HashMap<TileValue, Image>,
-    tile_cursor: Asset<Image>,
+    _tile_cursor: Asset<Image>,
     empty_asset: Asset<Image>,
     hab_asset: Asset<Image>,
     rock_asset: Asset<Image>,
@@ -91,20 +91,18 @@ impl State for GameplayState {
         let _ = system.set(camera_ent, KeyboardMove { speed: 2.5 });
         let _ = system.set(camera_ent, Camera { height: 10.0 });
         
-        let mut tile_textures:  HashMap<TileValue, Image> = HashMap::new();
+        let tile_textures:  HashMap<TileValue, Image> = HashMap::new();
 
-        let mut empty_asset = Asset::new(Image::load("tile_textures/empty.png"));
-        let mut hab_asset = Asset::new(Image::load("tile_textures/hab.png"));
-        let mut rock_asset = Asset::new(Image::load("tile_textures/rock.png"));
-
-        
+        let empty_asset = Asset::new(Image::load("tile_textures/empty.png"));
+        let hab_asset = Asset::new(Image::load("tile_textures/hab.png"));
+        let rock_asset = Asset::new(Image::load("tile_textures/rock.png"));
 
         Ok( GameplayState{ 
             system, world: 
             TileMap::new(), 
             camera_id: camera_ent, 
             tile_textures, 
-            tile_cursor: Asset::new(Image::load("selection.png")),
+            _tile_cursor: Asset::new(Image::load("selection.png")),
             empty_asset,
             hab_asset,
             rock_asset,
@@ -136,7 +134,7 @@ impl State for GameplayState {
         window.clear(Color::BLACK)?;
 
         //Prepare the camera
-        // Calculate the aspect ratio of the display
+        // Calculate the aspect ratio of the displaysa
         let screen_size = window.screen_size();
         let aspect_ratio = screen_size.x / screen_size.y;
 

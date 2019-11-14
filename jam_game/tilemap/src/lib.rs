@@ -303,7 +303,7 @@ pub mod tile_world {
             self.make_single_tile_change(&pos, *new_value);
         }
 
-        pub fn set_area(&mut self, top_left: &GridCoord, size: &GridCoord, new_value: TileValue) {
+        fn set_area(&mut self, top_left: &GridCoord, size: &GridCoord, new_value: TileValue) {
             let x_min = top_left.x;
             let y_min = top_left.y;
 
